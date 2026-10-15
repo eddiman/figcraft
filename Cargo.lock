@@ -1553,6 +1553,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "figcraft-ipad-spike"
+version = "0.6.0"
+dependencies = [
+ "eframe",
+ "egui",
+ "env_logger",
+ "figcraft-color",
+ "figcraft-doc",
+ "figcraft-engine",
+ "figcraft-format",
+ "figcraft-text",
+ "figcraft-ui-egui",
+ "image",
+ "serde_json",
+]
+
+[[package]]
 name = "figcraft-layout"
 version = "0.6.0"
 dependencies = [
