@@ -1498,6 +1498,8 @@ mod interaction_rollback_tests;
 #[cfg(test)]
 mod invite_links_tests;
 #[cfg(test)]
+mod ipad_fixture_tests;
+#[cfg(test)]
 mod keymap_tests;
 #[cfg(test)]
 mod library_variables_tests;

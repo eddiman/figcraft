@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "source_commit": "102404e8c3d23d86c3490c1a6beff3202bb73e25",
+  "font_configuration": {
+    "optional_craft_fonts_available": false,
+    "configured_input": "../craft-fonts",
+    "system_fonts": "Scanned before builders, following upstream template tests. Glyph metrics depend on host fonts.",
+    "expectations": "Semantic assertions only; no pixel or font metric expectations."
+  },
+  "existing_archives": [
+    {
+      "path": "examples/ridgeline-app.figcraft",
+      "sha256": "d5118aa2d2e8b161c14753d1798e7e14329df578e94ee3d146160e88a2224950",
+      "bytes": 58167
+    },
+    {
+      "path": "examples/ridgeline-design-system.figcraft",
+      "sha256": "7e6a19d869e609d9ada1de52347e3e43d1535b718dbd3a4fc19d9ca4b0003d3a",
+      "bytes": 44021
+    },
+    {
+      "path": "examples/glass-and-vectors.figcraft",
+      "sha256": "f372add6326da3fc55b6c57df091d489e60ac81c1ba0fee026c70f075111df7c",
+      "bytes": 51903
+    }
+  ],
+  "generated": [
+    {
+      "name": "small",
+      "builder": "crates/engine/src/ipad_fixture_tests.rs::fixture",
+      "layers": 50,
+      "image": "Original generated 2x2 RGBA [24,96,168,255] PNG"
+    },
+    {
+      "name": "medium",
+      "builder": "crates/engine/src/ipad_fixture_tests.rs::fixture",
+      "layers": 1000,
+      "image": "Original generated 2x2 RGBA [24,96,168,255] PNG"
+    }
+  ],
+  "history": {
+    "main_version": {
+      "id": "ipad-main-v1",
+      "time": 10
+    },
+    "branch": {
+      "id": "ipad-branch",
+      "time": 20,
+      "client": 7,
+      "state": "active",
+      "head_name": "Exploration"
+    },
+    "branch_version": {
+      "id": "ipad-branch-v1",
+      "time": 21
+    }
+  },
+  "qualification_recipes": [
+    {
+      "name": "large",
+      "layers": 10000,
+      "effects": false
+    },
+    {
+      "name": "effect-heavy",
+      "layers": 1000,
+      "effects": "Drop shadow, layer blur and glass on every rectangle"
+    }
+  ],
+  "performance_measurements": null
+}
