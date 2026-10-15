@@ -1,0 +1,197 @@
+{
+  "schema_version": 1,
+  "observed_date": "2026-10-15",
+  "repository_path": "/Users/edvardpiresbjorgen/Documents/Codex/2026-10-15/https-github-com-storytold-figcraft-is/upstream-source",
+  "upstream_commit": "102404e8c3d23d86c3490c1a6beff3202bb73e25",
+  "downstream_commit": null,
+  "initial_status": "",
+  "remotes": [
+    "origin\thttps://github.com/storytold/figcraft.git (fetch)",
+    "origin\thttps://github.com/storytold/figcraft.git (push)"
+  ],
+  "shallow": true,
+  "fork_push_destination": null,
+  "push_policy": "No push destination supplied. Origin is original project; do not push.",
+  "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+  "cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+  "installed_targets": [
+    "aarch64-apple-darwin"
+  ],
+  "developer_directory": "/Library/Developer/CommandLineTools",
+  "xcode_version": null,
+  "iphoneos_sdk": null,
+  "iphonesimulator_sdk": null,
+  "physical_device": null,
+  "font_input": {
+    "configured": "../craft-fonts (Cargo relative config)",
+    "available": false,
+    "override": null
+  },
+  "lockfile_sha256": "b8f63b8ce218c25ed67bb08152e074e5d9a86d7fee85886dd8a7ddaef456ef96",
+  "observations": [
+    {
+      "command": "git rev-parse HEAD",
+      "exit_code": 0,
+      "output": "102404e8c3d23d86c3490c1a6beff3202bb73e25\n",
+      "evidence": "ipad-port-evidence/T00/00.log",
+      "sha256": "7fdfc1614f250c3e9b8c99ceb717e6b15c5474edba2b593c7fdeaaa0c573a100"
+    },
+    {
+      "command": "git status --short",
+      "exit_code": 0,
+      "output": "",
+      "evidence": "ipad-port-evidence/T00/01.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "command": "git remote -v",
+      "exit_code": 0,
+      "output": "origin\thttps://github.com/storytold/figcraft.git (fetch)\norigin\thttps://github.com/storytold/figcraft.git (push)\n",
+      "evidence": "ipad-port-evidence/T00/02.log",
+      "sha256": "6a8939665710f8b6d8a6e1070fe3b3d41147a0b58dcc038834a171e43185d72f"
+    },
+    {
+      "command": "git rev-parse --is-shallow-repository",
+      "exit_code": 0,
+      "output": "true\n",
+      "evidence": "ipad-port-evidence/T00/03.log",
+      "sha256": "a17fcf0a2f50e2d495e4f90ce263410edc183add6c62699a2facbccf60410f74"
+    },
+    {
+      "command": "rustc --version",
+      "exit_code": 0,
+      "output": "rustc 1.98.1 (48a229cea 2026-09-01)\n",
+      "evidence": "ipad-port-evidence/T00/04.log",
+      "sha256": "2073de5abf149185c2f4d7473dc833bc921b99135560d24ae7b2293f33a9c376"
+    },
+    {
+      "command": "cargo --version",
+      "exit_code": 0,
+      "output": "cargo 1.98.1 (797e8a9bc 2026-08-05)\n",
+      "evidence": "ipad-port-evidence/T00/05.log",
+      "sha256": "9950bbb2d5c3417b1a068f0e81f6d3cac991a363193bdf2a22d447f5acf8b503"
+    },
+    {
+      "command": "rustup target list --installed",
+      "exit_code": 0,
+      "output": "aarch64-apple-darwin\n",
+      "evidence": "ipad-port-evidence/T00/06.log",
+      "sha256": "19afaf54e1c73ed8d742a22e5ad23c0fc9875c0697df22365652435250dd2496"
+    },
+    {
+      "command": "rustup component list --installed",
+      "exit_code": 0,
+      "output": "cargo-aarch64-apple-darwin\nclippy-aarch64-apple-darwin\nrust-docs-aarch64-apple-darwin\nrust-std-aarch64-apple-darwin\nrustc-aarch64-apple-darwin\nrustfmt-aarch64-apple-darwin\n",
+      "evidence": "ipad-port-evidence/T00/07.log",
+      "sha256": "241404bd7f41daccf0ce1569fdfe2d6c8d947480cb450314c73003824f2b9622"
+    },
+    {
+      "command": "xcode-select -p",
+      "exit_code": 0,
+      "output": "/Library/Developer/CommandLineTools\n",
+      "evidence": "ipad-port-evidence/T00/08.log",
+      "sha256": "a8044fec385da5d3d686b9c06000917f00d0f27ca72b7db5b47bfc277f748301"
+    },
+    {
+      "command": "xcodebuild -version",
+      "exit_code": 1,
+      "output": "xcode-select: error: tool 'xcodebuild' requires Xcode, but active developer directory '/Library/Developer/CommandLineTools' is a command line tools instance\n",
+      "evidence": "ipad-port-evidence/T00/09.log",
+      "sha256": "6f9bc3a54a75fa953f758e1aadfbc9f16c254cd631aaea9026c126a55b054641"
+    },
+    {
+      "command": "xcrun --sdk iphoneos --show-sdk-version",
+      "exit_code": 1,
+      "output": "xcrun: error: SDK \"iphoneos\" cannot be located\nxcrun: error: SDK \"iphoneos\" cannot be located\nxcrun: error: Failed to open property list '/Users/edvardpiresbjorgen/Documents/Codex/2026-10-15/https-github-com-storytold-figcraft-is/upstream-source/iphoneos/SDKSettings.plist'\nxcrun: error: SDK \"iphoneos\" cannot be located\nxcrun: error: unable to lookup item 'SDKVersion' in SDK 'iphoneos'\n",
+      "evidence": "ipad-port-evidence/T00/10.log",
+      "sha256": "f4a7729113994463f8427d1cbcb3b8f0b07577da2822c5b50e777dbfb1d9f3ec"
+    },
+    {
+      "command": "xcrun --sdk iphonesimulator --show-sdk-version",
+      "exit_code": 1,
+      "output": "xcrun: error: SDK \"iphonesimulator\" cannot be located\nxcrun: error: SDK \"iphonesimulator\" cannot be located\nxcrun: error: Failed to open property list '/Users/edvardpiresbjorgen/Documents/Codex/2026-10-15/https-github-com-storytold-figcraft-is/upstream-source/iphonesimulator/SDKSettings.plist'\nxcrun: error: SDK \"iphonesimulator\" cannot be located\nxcrun: error: unable to lookup item 'SDKVersion' in SDK 'iphonesimulator'\n",
+      "evidence": "ipad-port-evidence/T00/11.log",
+      "sha256": "0e5cf2cf2d4526b0280851dce28f1cf4503357b544f88a7f9930fa3059a24df6"
+    },
+    {
+      "command": "xcrun simctl list devices available",
+      "exit_code": 72,
+      "output": "xcrun: error: unable to find utility \"simctl\", not a developer tool or in PATH\n",
+      "evidence": "ipad-port-evidence/T00/12.log",
+      "sha256": "99b8da8adc7e70feba56cd931740e16d0f5724d7515e98d84d2c8bf1bb63dec8"
+    },
+    {
+      "command": "sw_vers",
+      "exit_code": 0,
+      "output": "ProductName:\t\tmacOS\nProductVersion:\t\t15.7.4\nBuildVersion:\t\t24G517\n",
+      "evidence": "ipad-port-evidence/T00/13.log",
+      "sha256": "6b5ab5473fa2d31a14c5fe9a93ce8701e324a02ab5cc32da03bdc85a6bc02bd4"
+    },
+    {
+      "command": "ls /Applications",
+      "exit_code": 0,
+      "output": "BetterDisplay.app\nBetterTouchTool.app\nBlender 4.5.app\nChatGPT.app\nChrome Remote Desktop Host Uninstaller.app\nDiscord.app\nDiskBuddy.app\nFigma.app\nFirefox.app\nGoogle Chrome.app\nGoogle Docs.app\nGoogle Sheets.app\nGoogle Slides.app\nJottacloud.app\nMounty.app\nOpenRCT2.app\nPlex Media Server.app\nRiot Client.app\nSD Card Formatter.app\nSafari.app\nSlack.app\nSpatial.app\nSpotify.app\nSteam.app\nSubler.app\nTailscale.app\nTermina.app\nTestFlight.app\nUnity Hub.app\nUtilities\nVisual Studio Code.app\nlogioptionsplus.app\nuTorrent Web.app\n",
+      "evidence": "ipad-port-evidence/T00/14.log",
+      "sha256": "c758509ac0038b0cc551e12b660596609141da06df1d21ab951d2b42af2274aa"
+    },
+    {
+      "command": "ls ../craftrules/AGENTS.md",
+      "exit_code": 1,
+      "output": "ls: ../craftrules/AGENTS.md: No such file or directory\n",
+      "evidence": "ipad-port-evidence/T00/15.log",
+      "sha256": "f0b67ac94ebee2cf5126a681afd634500b80c633d4d6afd7d32b56d7cc080fd9"
+    }
+  ],
+  "baseline_checks": [
+    {
+      "command": "cargo xtask ci",
+      "exit_code": 101,
+      "evidence": "ipad-port-evidence/T00/ci.log",
+      "sha256": "deece3ce36183a87fcadbf8ae1897dcff8ff23ea6b2455966cb4e70f86e5a646"
+    },
+    {
+      "command": "cargo fmt --all -- --check",
+      "exit_code": 0,
+      "outcome": "Passed on unmodified source.",
+      "evidence": "ipad-port-evidence/T00/fmt.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "command": "cargo xtask ci",
+      "exit_code": 1,
+      "outcome": "Invalid baseline: working source changed before fmt ran. Exclude from baseline conclusions.",
+      "evidence": "ipad-port-evidence/T00/ci-network-retry.log",
+      "sha256": "57b10590239ac96059c55565864457a9f56147281f61ab3966628bcccab2106f"
+    },
+    {
+      "command": "cargo xtask ci",
+      "exit_code": null,
+      "outcome": "Interrupted before completion; fmt and clippy passed, workspace tests incomplete. No final exit code captured.",
+      "evidence": "ipad-port-evidence/T00/ci-pristine.log",
+      "sha256": "c2f253a04d921ed443e601e27b8bd3853f3ab0e0826bef6e0ffc1a912d63e4fb"
+    }
+  ],
+  "setup_required": [
+    "Install full Xcode with iOS SDKs and an iPad simulator runtime, then select its developer directory. No existing Xcode was found in /Applications.",
+    "Install Rust targets aarch64-apple-ios, aarch64-apple-ios-sim.",
+    "Identify a physical iPad and record hardware, OS and accessories for T02.",
+    "Recover upstream history before T24 ancestry-preserving merge rehearsal; this checkout is shallow.",
+    "Supply a downstream fork destination before any future push."
+  ],
+  "shared_code_changes": [],
+  "new_dependencies": [],
+  "dependency_access": "Initial sandbox DNS failed; permitted network retry fetched dependencies. Package checks can now use the local cache.",
+  "setup_changes": [
+    {
+      "command": "rustup target add wasm32-unknown-unknown",
+      "exit_code": 0,
+      "reason": "Required upstream web compatibility CI check",
+      "evidence": "ipad-port-evidence/T00/wasm-target-setup.log",
+      "sha256": "831ad8906cd548d1be0b512110752469e0a5b4f23e8ea459eb4bf438761bef31"
+    }
+  ],
+  "installed_targets_after_setup": [
+    "aarch64-apple-darwin",
+    "wasm32-unknown-unknown"
+  ]
+}
