@@ -1,0 +1,21 @@
+// !$*UTF8*$!
+{
+ archiveVersion = 1;
+ classes = {};
+ objectVersion = 56;
+ objects = {
+  A10000000000000000000001 = { isa = PBXProject; attributes = { LastUpgradeCheck = 2600; }; buildConfigurationList = A10000000000000000000002; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base); mainGroup = A10000000000000000000003; productRefGroup = A10000000000000000000004; projectDirPath = ""; projectRoot = ""; targets = (A10000000000000000000005); };
+  A10000000000000000000002 = { isa = XCConfigurationList; buildConfigurations = (A10000000000000000000010, A10000000000000000000011); defaultConfigurationIsVisible = 0; defaultConfigurationName = Debug; };
+  A10000000000000000000003 = { isa = PBXGroup; children = (A10000000000000000000004); sourceTree = "<group>"; };
+  A10000000000000000000004 = { isa = PBXGroup; children = (A10000000000000000000006); name = Products; sourceTree = "<group>"; };
+  A10000000000000000000005 = { isa = PBXNativeTarget; buildConfigurationList = A10000000000000000000007; buildPhases = (A10000000000000000000008); buildRules = (); dependencies = (); name = FigcraftIPad; productName = FigcraftIPad; productReference = A10000000000000000000006; productType = "com.apple.product-type.application"; };
+  A10000000000000000000006 = { isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FigcraftIPad.app; sourceTree = BUILT_PRODUCTS_DIR; };
+  A10000000000000000000007 = { isa = XCConfigurationList; buildConfigurations = (A10000000000000000000012, A10000000000000000000013); defaultConfigurationIsVisible = 0; defaultConfigurationName = Debug; };
+  A10000000000000000000008 = { isa = PBXShellScriptBuildPhase; alwaysOutOfDate = 1; buildActionMask = 2147483647; files = (); inputPaths = (); name = "Link Rust executable"; outputPaths = (); runOnlyForDeploymentPostprocessing = 0; shellPath = /bin/bash; shellScript = "exec /bin/bash \"${SRCROOT}/cargo-build.sh\"\n"; showEnvVarsInLog = 0; };
+  A10000000000000000000010 = { isa = XCBuildConfiguration; buildSettings = {}; name = Debug; };
+  A10000000000000000000011 = { isa = XCBuildConfiguration; buildSettings = {}; name = Release; };
+  A10000000000000000000012 = { isa = XCBuildConfiguration; buildSettings = { ARCHS = arm64; CODE_SIGNING_ALLOWED = NO; ENABLE_USER_SCRIPT_SANDBOXING = NO; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = "org.figcraft.ipad-development"; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; TARGETED_DEVICE_FAMILY = 2; }; name = Debug; };
+  A10000000000000000000013 = { isa = XCBuildConfiguration; buildSettings = { ARCHS = arm64; CODE_SIGNING_ALLOWED = NO; ENABLE_USER_SCRIPT_SANDBOXING = NO; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = "org.figcraft.ipad-development"; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; TARGETED_DEVICE_FAMILY = 2; }; name = Release; };
+ };
+ rootObject = A10000000000000000000001;
+}

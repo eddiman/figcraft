@@ -1,4 +1,4 @@
-//! T02 experiment: one Rust entry point, eframe/winit event loop and shared FigCraft editor.
+//! Approved development host: one eframe/winit event loop and the shared editor.
 use std::error::Error;
 use std::io::Cursor;
 
@@ -22,24 +22,35 @@ fn small_fixture() -> Result<Document, Box<dyn Error>> {
     Ok(doc)
 }
 
-struct SpikeShell {
+struct Shell {
     field: String,
     fit_requested: bool,
+    smoke: bool,
 }
 
-impl eframe::App for SpikeShell {
+impl eframe::App for Shell {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         ui.painter().rect_filled(ui.max_rect(), 0.0, ui.visuals().panel_fill);
         ui.add_space(ui.input(|i| i.safe_area_insets().0.top).max(32.0));
-        ui.horizontal(|ui| {
-            ui.label("T02 simulator spike");
-            ui.label("Field:");
-            ui.text_edit_singleline(&mut self.field);
-            ui.label(format!("{} characters", self.field.chars().count()));
-        });
-        ui.separator();
+        let mut move_fixture = false;
+        if self.smoke {
+            ui.horizontal(|ui| {
+                ui.label("iPad startup smoke");
+                ui.label("Field:");
+                ui.text_edit_singleline(&mut self.field);
+                ui.label(format!("{} characters", self.field.chars().count()));
+                move_fixture = ui.button("Set fixture X = 10").clicked();
+            });
+            ui.separator();
+        }
         let ctx = ui.ctx().clone();
         figcraft_ui_egui::windows::with_app(|fig| {
+            if move_fixture {
+                let fixture = fig.session.doc().ok().and_then(|doc| doc.nodes().find(|node| node.name == "Fixture image").map(|node| node.id));
+                if let Some(id) = fixture {
+                    fig.run("node.set", serde_json::json!({"id": id, "props": {"x": 10.0}}));
+                }
+            }
             if !self.fit_requested {
                 fig.run("view.zoomFit", serde_json::json!({}));
                 self.fit_requested = true;
@@ -49,10 +60,10 @@ impl eframe::App for SpikeShell {
     }
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
+pub fn run() -> Result<(), Box<dyn Error>> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-    eprintln!("T02: constructing the shared fixture");
-    let session = Session::with_document(small_fixture()?);
+    let smoke = std::env::args().any(|arg| arg == "--smoke");
+    let session = if smoke { Session::with_document(small_fixture()?) } else { Session::new() };
     let mut fig = FigApp::new(session, Box::new(NoServices));
     fig.ui.home = false;
     figcraft_ui_egui::windows::install(fig);
@@ -67,7 +78,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             descriptor
         });
     }
-    eprintln!("T02: starting the single eframe event loop");
-    eframe::run_native("FigCraft iPad spike", options, Box::new(|_cc| Ok(Box::new(SpikeShell { field: String::new(), fit_requested: false }))))?;
+
+    eframe::run_native("FigCraft iPad", options, Box::new(move |_cc| Ok(Box::new(Shell { field: String::new(), fit_requested: false, smoke }))))?;
     Ok(())
 }
