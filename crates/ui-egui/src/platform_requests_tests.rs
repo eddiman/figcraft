@@ -340,3 +340,22 @@ fn ipad_request_poll_bounds_duplicate_stream() {
     assert_eq!(app.session.ds().unwrap().history.undo.len(), 1);
     assert_eq!(drops.get(), 1);
 }
+
+#[test]
+fn ipad_export_tree_request_routes_completion_to_initiating_document() {
+    use crate::platform_export_tree::ExportTree;
+    let (mut app, state, ctx) = setup();
+    let origin = target(&app);
+    let stage = StagingLease::create(&std::env::temp_dir()).unwrap();
+    let tree = ExportTree::new(stage, vec!["icons/close.png".into()]).unwrap();
+    let drops = Rc::new(Cell::new(0));
+    let id = app.submit_platform_request(&ctx, Some(origin), Operation::ExportTree { picker: spec(), tree }, edit(drops.clone())).unwrap();
+    app.run("file.new", json!({})).unwrap();
+    let other = target(&app);
+    complete(&state, id, PlatformResult::Completed(Payload::Exported));
+    app.poll_platform_requests(&ctx);
+    assert_eq!(target(&app), other);
+    assert!(app.session.ds().unwrap().history.undo.is_empty());
+    assert_eq!(app.session.docs.iter().find(|d| d.uid == origin.uid).unwrap().history.undo.len(), 1);
+    assert_eq!(drops.get(), 1);
+}

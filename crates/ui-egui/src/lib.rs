@@ -44,6 +44,9 @@ pub mod measure_overlay;
 pub mod menus;
 pub mod online;
 pub mod platform;
+pub mod platform_export_tree;
+#[cfg(test)]
+mod platform_export_tree_tests;
 pub mod platform_requests;
 #[cfg(test)]
 mod platform_requests_tests;

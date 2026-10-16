@@ -34,6 +34,7 @@ pub enum Operation {
     ImportCopy(PickerSpec),
     SaveAs(PickerSpec),
     ExportFiles { picker: PickerSpec, files: Vec<StagedFile> },
+    ExportTree { picker: PickerSpec, tree: crate::platform_export_tree::ExportTree },
 }
 #[derive(Debug)]
 pub struct StagedFile {
@@ -59,6 +60,10 @@ impl StagingLease {
             }
         }
         Err(std::io::Error::other("cannot allocate a unique staging directory"))
+    }
+
+    pub(crate) fn root(&self) -> &Path {
+        &self.root
     }
 
     pub fn file(self: &Arc<Self>, display_name: String) -> Result<StagedFile, RejectReason> {
@@ -151,7 +156,7 @@ impl FigApp {
             Operation::OpenCopy(_) => Expected::Selected,
             Operation::ImportCopy(_) => Expected::Selected,
             Operation::SaveAs(_) => Expected::Destination,
-            Operation::ExportFiles { .. } => Expected::Exported,
+            Operation::ExportFiles { .. } | Operation::ExportTree { .. } => Expected::Exported,
         };
         let invalid = (!matches!(operation, Operation::OpenCopy(_)) && document.is_none())
             || document.is_some_and(|d| !self.session.docs.iter().any(|tab| tab.uid == d.uid));
@@ -275,6 +280,18 @@ pub fn submit_desktop(services: &mut (impl Services + ?Sized), request: Platform
         Operation::SaveAs(p) => services
             .pick_save(&p.title, p.suggested_name.as_deref().unwrap_or_default(), &p.extensions.iter().map(String::as_str).collect::<Vec<_>>())
             .map(Payload::Destination),
+        Operation::ExportTree { picker, tree } => {
+            if let Err(e) = tree.validate_sources() {
+                return Submission::Completed(PlatformResult::Failed(e.to_string()));
+            }
+            let Some(dir) = services.pick_folder(&picker.title) else {
+                return Submission::Completed(PlatformResult::Cancelled);
+            };
+            if let Err(e) = tree.copy_to(&dir) {
+                return Submission::Completed(PlatformResult::Failed(e.to_string()));
+            }
+            Some(Payload::Exported)
+        }
         Operation::ExportFiles { picker, files } => {
             let mut names = BTreeSet::new();
             if files.is_empty() || files.iter().any(|f| !valid_name(&f.display_name) || !names.insert(f.display_name.clone())) {
