@@ -260,6 +260,7 @@ impl Session {
     }
 }
 pub fn prepare_save(session: &mut Session, document_uid: u64) -> Result<PreparedSave> {
+    session.pointer_persistence_edit()?;
     let i = main_index(session, document_uid)?;
     let order = NEXT_SAVE
         .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
@@ -304,6 +305,7 @@ pub fn acknowledge_save(
     destination: SaveDestination,
     assurance: SaveAssurance,
 ) -> Result<SaveOutcome> {
+    session.pointer_persistence_edit()?;
     let Some(i) =
         session.docs.iter().position(|d| d.uid == prepared.identity.uid && Arc::ptr_eq(&d.persistence.incarnation, &prepared.identity.incarnation))
     else {

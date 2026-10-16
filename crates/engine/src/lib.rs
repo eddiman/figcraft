@@ -41,6 +41,7 @@ pub mod persistence;
 pub mod playground;
 pub mod plugin_directory;
 pub mod plugins;
+mod pointer_gesture;
 pub mod proto_run;
 pub mod rename;
 pub mod rotation_origin;
@@ -61,6 +62,7 @@ pub use cmd::{CommandSpec, all_commands, find_command};
 pub use figcraft_collab;
 pub use figcraft_doc as doc;
 pub use figcraft_svg::looks_like_svg;
+pub use pointer_gesture::{PointerGestureEnd, PointerGestureToken};
 pub use tools::{PointerEvent, PointerKind, ToolId};
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -668,6 +670,8 @@ pub struct Clipboard {
 
 /// The editing session: open documents, the current tool, clipboard and prefs.
 pub struct Session {
+    pointer_checkpoint: Option<pointer_gesture::Checkpoint>,
+    pointer_owned: bool,
     pub docs: Vec<DocState>,
     pub active: usize,
     pub clipboard: Clipboard,
@@ -714,6 +718,8 @@ impl Session {
     /// A session with no documents (the home screen).
     pub fn empty() -> Self {
         Self {
+            pointer_checkpoint: None,
+            pointer_owned: false,
             docs: Vec::new(),
             active: 0,
             clipboard: Clipboard::default(),
@@ -793,6 +799,7 @@ impl Session {
     }
 
     pub fn doc_mut(&mut self) -> Result<&mut Document> {
+        self.pointer_external_edit()?;
         Ok(self.ds_mut()?.doc_mut())
     }
 
@@ -801,6 +808,9 @@ impl Session {
     }
 
     pub fn set_selection(&mut self, ids: Vec<NodeId>) {
+        if !self.pointer_external_edit_or_notice() {
+            return;
+        }
         if let Ok(ds) = self.ds_mut() {
             ds.selection = ids;
             ds.clean_selection();
@@ -815,12 +825,15 @@ impl Session {
     /// Run a command by id. Mutations become one undo step; a failure or panic leaves the document
     /// as it was.
     pub fn execute(&mut self, id: &str, params: &Value) -> Result<Value> {
+        self.pointer_external_edit()?;
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
         // Revert replaces the document's uid: refuse before ending previews or syncing branches.
         if id == "file.revert" && self.live().doc_uid.is_some() {
             return Err(EngineError::Disabled(id.into(), "leave the live session before reverting to the saved file".into()));
         }
-        branches::sync(self);
+        if !self.pointer_owned {
+            branches::sync(self);
+        }
         if textpreview::COMMANDS.contains(&id) {
             // A live preview is no edit: no undo step, normalisation or rollback here.
             let r = guard::run(id, || (spec.run)(self, params));
@@ -844,12 +857,14 @@ impl Session {
         match &result {
             Ok(_) => {
                 self.after_command(spec, before);
-                if spec.history && id != "edit.repeat" {
-                    self.last_command = Some((id.to_string(), params.clone()));
-                }
-                self.journal.push((id.to_string(), params.clone()));
-                if self.journal.len() > 5000 {
-                    self.journal.drain(..1000);
+                if !self.pointer_command_effects(id, params, spec.history) {
+                    if spec.history && id != "edit.repeat" {
+                        self.last_command = Some((id.to_string(), params.clone()));
+                    }
+                    self.journal.push((id.to_string(), params.clone()));
+                    if self.journal.len() > 5000 {
+                        self.journal.drain(..1000);
+                    }
                 }
             }
             Err(_) => {
@@ -963,6 +978,7 @@ impl Session {
 
     /// Start a gesture: later [`preview`](Self::preview) calls re-apply edits to this snapshot.
     pub fn begin_interaction(&mut self, label: &str) -> Result<()> {
+        self.pointer_external_edit()?;
         textpreview::end(self);
         if let Some(why) = self.active_read_only() {
             return Err(EngineError::Disabled(label.to_string(), why.into()));
@@ -979,6 +995,7 @@ impl Session {
 
     /// Replace the document with `f(snapshot)` for a live preview during a gesture.
     pub fn preview(&mut self, f: impl FnOnce(&mut Document, &mut Vec<NodeId>) -> Result<()>) -> Result<()> {
+        self.pointer_external_edit()?;
         let ds = self.ds_mut()?;
         let Some(it) = ds.interaction.clone() else { return Err(EngineError::Other("no gesture in progress".into())) };
         let mut doc = (*it.doc).clone();
@@ -1001,6 +1018,7 @@ impl Session {
 
     /// Finish a gesture as one undo step (no step if nothing changed).
     pub fn commit_interaction(&mut self) -> Result<()> {
+        self.pointer_external_edit()?;
         let ds = self.ds_mut()?;
         let Some(it) = ds.interaction.take() else { return Ok(()) };
         let (uid, page) = (ds.uid, ds.page);
@@ -1015,6 +1033,7 @@ impl Session {
 
     /// Abandon a gesture, restoring the document.
     pub fn cancel_interaction(&mut self) -> Result<()> {
+        self.pointer_external_edit()?;
         let ds = self.ds_mut()?;
         if let Some(it) = ds.interaction.take() {
             ds.doc = it.doc;
@@ -1025,6 +1044,7 @@ impl Session {
     }
 
     pub fn undo(&mut self) -> Result<bool> {
+        self.pointer_external_edit()?;
         textpreview::end(self);
         let live = self.ds().is_ok_and(|d| self.live_doc(d.uid));
         let ds = self.ds_mut()?;
@@ -1055,6 +1075,7 @@ impl Session {
     }
 
     pub fn redo(&mut self) -> Result<bool> {
+        self.pointer_external_edit()?;
         textpreview::end(self);
         let live = self.ds().is_ok_and(|d| self.live_doc(d.uid));
         let ds = self.ds_mut()?;
@@ -1085,6 +1106,9 @@ impl Session {
 
     /// Queue a UI request (dialogs etc.).
     pub fn request_ui(&mut self, kind: &str, data: Value) {
+        if !self.pointer_external_edit_or_notice() || self.pointer_ui_request(kind, &data) {
+            return;
+        }
         self.ui_requests.push(UiRequest { kind: kind.to_string(), data });
     }
 
@@ -1096,6 +1120,7 @@ impl Session {
     /// Run `f` as one undo step called `label`: the commands it executes push no steps of their
     /// own, and when it fails the documents stay at their group-start state.
     pub fn grouped<T>(&mut self, label: &str, f: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        self.pointer_external_edit()?;
         self.ds()?;
         let before: Vec<_> =
             self.docs.iter().map(|ds| (ds.uid, ds.doc.clone(), ds.selection.clone(), ds.page, ds.history.undo.len(), ds.history.limit)).collect();
@@ -1663,3 +1688,6 @@ mod widgets_tests;
 
 #[cfg(test)]
 mod persistence_tests;
+
+#[cfg(test)]
+mod ipad_cancel_tests;

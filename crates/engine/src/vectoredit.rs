@@ -505,6 +505,7 @@ pub fn enter_targets(doc: &Document, sel: &[NodeId]) -> Option<Vec<NodeId>> {
 /// Start editing `ids` as vectors at once (shapes are converted, in one undo step); the first is
 /// the active layer. Layers that can't be edited as vectors are left out (an error when none can).
 pub fn begin_many(s: &mut Session, ids: &[NodeId]) -> Result<()> {
+    s.pointer_external_edit()?;
     let before = s.ds()?.doc.clone();
     let mut edited = Vec::new();
     let mut first_err = None;
@@ -541,6 +542,7 @@ pub fn begin_many(s: &mut Session, ids: &[NodeId]) -> Result<()> {
 const MAX_EDITED: usize = 500;
 
 pub fn end(s: &mut Session) -> Result<()> {
+    s.pointer_external_edit()?;
     let ds = s.ds_mut()?;
     ds.vector_edit = None;
     ds.revision += 1;
@@ -563,6 +565,7 @@ pub(crate) fn set_state(s: &mut Session, f: impl FnOnce(&mut VectorEdit)) -> Res
 }
 
 pub fn set_tool(s: &mut Session, tool: VTool) -> Result<()> {
+    s.pointer_external_edit()?;
     s.tool.overlay = Default::default();
     set_state(s, |ve| {
         ve.tool = tool;
@@ -576,6 +579,7 @@ pub fn set_tool(s: &mut Session, tool: VTool) -> Result<()> {
 
 /// Escape: end the pen's path first, then leave edit mode.
 pub fn escape(s: &mut Session) -> Result<()> {
+    s.pointer_external_edit()?;
     let ve = editing(s)?;
     if ve.anchor.is_some() {
         s.tool.overlay.rubber = None;
@@ -704,6 +708,7 @@ pub(crate) fn points_of(net: &VectorNetwork, vertices: &[usize], segments: &[usi
 
 /// Keyboard in edit mode. Returns whether the key was used (others fall through to shortcuts).
 pub fn key(s: &mut Session, name: &str, shift: bool, alt: bool, cmd: bool) -> Result<bool> {
+    s.pointer_external_edit()?;
     let Ok(ve) = editing(s) else { return Ok(false) };
     let nudge = |big: bool, s: &Session| if big { s.prefs.nudge_big } else { s.prefs.nudge_small };
     let arrow = match name {
