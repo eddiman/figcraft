@@ -36,7 +36,7 @@ The Release configuration is not a release-qualification path: the scheme and sc
 
 ## Simulator smoke
 
-The default app opens a shared blank editor with NoServices. Native file pickers, persistence and clipboard adapters have not been added. Pass `--smoke` for the deterministic T01 small fixture and ordinary egui field; the Xcode launch scheme enables this argument for development.
+The default app opens a shared blank editor with the iPad capability provider. Native file pickers, persistence and clipboard adapters have not been added. The provider explicitly disables multiple windows, reveal, local hosting and plugin downloads; shared request submission rejects Unsupported until a native adapter is supplied. Pass `--smoke` for the deterministic T01 small fixture and ordinary egui field; the Xcode launch scheme enables this argument for development.
 
 ```sh
 xcrun simctl install BCCE5B8D-96D3-45C1-84DD-3E0C84C9AE99 target/ipad-xcode/simulator/Build/Products/Debug-iphonesimulator/FigcraftIPad.app

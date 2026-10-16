@@ -199,6 +199,10 @@ fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 }
 
 impl Services for Desktop {
+    fn submit_request(&mut self, request: figcraft_ui_egui::platform_requests::PlatformRequest) -> figcraft_ui_egui::platform_requests::Submission {
+        figcraft_ui_egui::platform_requests::submit_desktop(self, request)
+    }
+
     fn pick_open(&mut self, title: &str, exts: &[&str]) -> Option<PathBuf> {
         rfd::FileDialog::new().set_title(title).add_filter("Supported files", exts).pick_file()
     }

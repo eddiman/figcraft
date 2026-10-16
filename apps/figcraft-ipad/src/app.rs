@@ -5,7 +5,14 @@ use std::io::Cursor;
 use figcraft_color::{ImageScaleMode, Paint};
 use figcraft_doc::{Document, NodeKind};
 use figcraft_engine::Session;
-use figcraft_ui_egui::{FigApp, NoServices};
+use figcraft_ui_egui::{FigApp, Services};
+
+struct IPadServices;
+impl Services for IPadServices {
+    fn capabilities(&self) -> figcraft_ui_egui::platform::PlatformCapabilities {
+        figcraft_ui_egui::platform::PlatformCapabilities::ipad()
+    }
+}
 
 /// The T01 small recipe, built with the upstream helper and an original generated image.
 fn small_fixture() -> Result<Document, Box<dyn Error>> {
@@ -64,7 +71,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let smoke = std::env::args().any(|arg| arg == "--smoke");
     let session = if smoke { Session::with_document(small_fixture()?) } else { Session::new() };
-    let mut fig = FigApp::new(session, Box::new(NoServices));
+    let mut fig = FigApp::new(session, Box::new(IPadServices));
     fig.ui.home = false;
     figcraft_ui_egui::windows::install(fig);
     let mut options = eframe::NativeOptions { renderer: eframe::Renderer::Wgpu, ..Default::default() };

@@ -40,6 +40,10 @@ pub mod live_text;
 pub mod measure_overlay;
 pub mod menus;
 pub mod online;
+pub mod platform;
+pub mod platform_requests;
+#[cfg(test)]
+mod platform_requests_tests;
 pub mod plugins_ui;
 pub mod present;
 pub mod proto_canvas;
@@ -178,6 +182,19 @@ pub use control::{ControlReply, ControlRequest};
 
 /// Platform services the app crate provides (file dialogs, clipboard, URLs).
 pub trait Services {
+    fn capabilities(&self) -> platform::PlatformCapabilities {
+        platform::PlatformCapabilities::desktop()
+    }
+    fn submit_request(&mut self, _request: platform_requests::PlatformRequest) -> platform_requests::Submission {
+        platform_requests::Submission::Rejected(platform_requests::RejectReason::Unsupported)
+    }
+    fn take_completion(&mut self) -> Option<platform_requests::Completion> {
+        None
+    }
+    fn cancel_request(&mut self, _id: platform_requests::RequestId) {}
+    /// Deferred adapters retain this notifier and request a frame when a completion arrives.
+    fn set_request_repaint(&mut self, _ctx: egui::Context) {}
+
     fn pick_open(&mut self, _title: &str, _exts: &[&str]) -> Option<PathBuf> {
         None
     }
@@ -533,6 +550,7 @@ pub struct FigApp {
     window_requests: Vec<figcraft_engine::UiRequest>,
     /// Commands waiting for a server ([`FigApp::run_background`]) and what to do with their results.
     waiting: Vec<(String, Done)>,
+    platform_requests: platform_requests::PendingRequests,
 }
 
 /// What to do with the result of a command run in the background.
@@ -560,6 +578,7 @@ impl FigApp {
             windows: windows::Windows::default(),
             window_requests: Vec::new(),
             waiting: Vec::new(),
+            platform_requests: platform_requests::PendingRequests::default(),
         }
     }
 
@@ -567,6 +586,7 @@ impl FigApp {
     pub fn run(&mut self, id: &str, params: Value) -> Option<Value> {
         let r = self.session.execute(id, &params);
         self.handle_ui_requests();
+        self.cancel_closed_platform_requests();
         r.map_err(|e| self.failed(id, &e)).ok()
     }
 
@@ -897,6 +917,7 @@ impl FigApp {
 
     /// Per-frame logic that doesn't draw (control requests, theme, language).
     pub fn logic(&mut self, ctx: &egui::Context) {
+        self.poll_platform_requests(ctx);
         if self.language.as_ref() != Some(&self.session.prefs.language) {
             i18n::set(&self.session.prefs.language, self.services.system_language().as_deref());
             self.language = Some(self.session.prefs.language.clone());

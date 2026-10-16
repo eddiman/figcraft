@@ -171,7 +171,7 @@ pub fn open(app: &mut FigApp, ctx: &Context, index: Option<usize>, path: Option<
     // shortcut: eframe 0.36 gives only the main window an AccessKit adapter, so other windows have
     // no screen-reader tree; while a screen reader runs files stay tabs here. Upgrade when eframe
     // adapts every viewport.
-    let one = if ctx.embed_viewports() {
+    let one = if !app.services.capabilities().multiple_windows || ctx.embed_viewports() {
         Some("This build has one window: files open as tabs")
     } else if crate::a11y::active(ctx) {
         Some("With a screen reader running, files open as tabs in the main window")
