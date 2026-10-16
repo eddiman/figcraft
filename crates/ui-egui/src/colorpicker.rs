@@ -161,6 +161,39 @@ fn write(app: &mut FigApp, target: &PickerTarget, paint: &Paint, live: bool) {
     }
 }
 
+/// Retain the document snapshot to guard fill indices and text ranges while waiting.
+pub(crate) fn choose_image(app: &mut FigApp, target: PickerTarget) {
+    let Some(original) = current_paint(app, &target) else { return };
+    let snapshot = app.session.ds().ok().map(|d| d.doc.clone());
+    app.import_copy(
+        tr("Choose image"),
+        &["png", "jpg", "jpeg", "webp", "gif", "tif", "tiff"],
+        Box::new(move |app, path| {
+            if !app.session.ds().ok().zip(snapshot.as_ref()).is_some_and(|(now, before)| std::sync::Arc::ptr_eq(&now.doc, before))
+                || current_paint(app, &target).as_ref() != Some(&original)
+            {
+                app.platform_error("The image fill target changed while the picker was open");
+                return;
+            }
+            let bytes = match std::fs::read(path) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    app.platform_error(&e.to_string());
+                    return;
+                }
+            };
+            let hash = app.session.doc_mut().ok().and_then(|d| figcraft_format_add(d, bytes));
+            if let Some(hash) = hash {
+                let mut paint = original;
+                paint.kind = Paint::image(hash, ImageScaleMode::Fill).kind;
+                write(app, &target, &paint, false);
+            } else {
+                app.platform_error("Could not read the selected image");
+            }
+        }),
+    );
+}
+
 fn finish(app: &mut FigApp) {
     if let Some(PickerTarget::PluginField { plugin, control, pending: Some(hex) }) = app.ui.picker.clone() {
         crate::plugins_ui::set_field(app, &plugin, &control, &hex);
@@ -459,25 +492,13 @@ pub fn show(app: &mut FigApp, ctx: &egui::Context) {
                 ui.horizontal(|ui| {
                     ui.add_space(12.0);
                     if let Some(i) = widgets::segmented(ui, &kinds, Some(active), 30.0) {
+                        if i == 5 {
+                            choose_image(app, target.clone());
+                            return;
+                        }
                         let base = paint.preview_color();
                         paint.kind = match i {
                             0 => PaintKind::Solid { color: base.with_alpha(1.0) },
-                            5 => {
-                                // Pick an image file.
-                                match app.services.pick_open(tr("Choose image"), &["png", "jpg", "jpeg", "webp", "gif", "tif", "tiff"]) {
-                                    Some(p) => match std::fs::read(&p) {
-                                        Ok(bytes) => {
-                                            let hash = app.session.doc_mut().ok().and_then(|d| figcraft_format_add(d, bytes));
-                                            match hash {
-                                                Some(h) => Paint::image(h, ImageScaleMode::Fill).kind,
-                                                None => paint.kind.clone(),
-                                            }
-                                        }
-                                        Err(_) => paint.kind.clone(),
-                                    },
-                                    None => paint.kind.clone(),
-                                }
-                            }
                             6 => match pattern_sources(app, &target).first() {
                                 Some((id, _)) => Paint::pattern(id.0).kind,
                                 None => {

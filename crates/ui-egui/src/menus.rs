@@ -193,7 +193,7 @@ fn menu_level(app: &mut FigApp, ui: &mut Ui, prefix: &str) -> bool {
                 continue;
             }
             // One window in the browser.
-            let enabled = available(m.id) && !(m.id == "window.new" && ui.ctx().embed_viewports());
+            let enabled = available(m.id) && !(m.id == "window.new" && (ui.ctx().embed_viewports() || !app.services.capabilities().multiple_windows));
             let checked = figcraft_engine::cmd::view::checked(&app.session, m.id).unwrap_or(false);
             if item(ui, &i18n::menu_item(m.id, m.label), crate::shortcuts::shortcut(m.id).unwrap_or(""), enabled, checked, &t) && enabled {
                 clicked = Some(m.id);

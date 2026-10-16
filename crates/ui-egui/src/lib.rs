@@ -557,6 +557,7 @@ pub struct FigApp {
     /// Commands waiting for a server ([`FigApp::run_background`]) and what to do with their results.
     waiting: Vec<(String, Done)>,
     platform_requests: platform_requests::PendingRequests,
+    platform_context: egui::Context,
 }
 
 /// What to do with the result of a command run in the background.
@@ -585,11 +586,15 @@ impl FigApp {
             window_requests: Vec::new(),
             waiting: Vec::new(),
             platform_requests: platform_requests::PendingRequests::default(),
+            platform_context: egui::Context::default(),
         }
     }
 
     /// Run a command, surfacing errors as a toast. Returns the result.
     pub fn run(&mut self, id: &str, params: Value) -> Option<Value> {
+        if !self.platform_command_allowed(id, &params) {
+            return None;
+        }
         let r = self.session.execute(id, &params);
         self.handle_ui_requests();
         self.cancel_closed_platform_requests();
@@ -609,6 +614,9 @@ impl FigApp {
     /// the answer arrives (the network wakes the window then); errors show as with [`run`](Self::run).
     /// [`Session::waiting_for`] tells the panels to show that it's on its way.
     pub fn run_background(&mut self, ctx: &egui::Context, id: &str, params: Value, done: Done) {
+        if !self.platform_command_allowed(id, &params) {
+            return;
+        }
         self.waiting.retain(|(c, _)| c != id);
         let r = self.session.start_background(id, params);
         self.handle_ui_requests();
@@ -845,17 +853,29 @@ impl FigApp {
     }
 
     pub fn save_as_dialog(&mut self) {
-        let name = self.session.doc().map(|d| d.name.clone()).unwrap_or_else(|_| "Untitled".into());
-        if let Some(p) = self.services.pick_save(i18n::tr("Save as"), &format!("{name}.figcraft"), &["figcraft"]) {
-            let ps = p.to_string_lossy().to_string();
-            if self.run("file.saveAs", json!({"path": ps})).is_some() {
-                self.toast(i18n::trf("Saved {name}", &[("name", &p.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default())]));
-            }
+        use platform_requests::{Operation, Payload};
+        if !self.desktop_document_write() {
+            return;
         }
+        let name = self.session.doc().map(|d| d.name.clone()).unwrap_or_else(|_| "Untitled".into());
+        let picker = Self::picker(i18n::tr("Save as"), Some(format!("{name}.figcraft")), &["figcraft"]);
+        self.request_platform(
+            self.platform_document(),
+            Operation::SaveAs(picker),
+            Box::new(|app, payload| {
+                if let Payload::Destination(p) = payload
+                    && app.run("file.saveAs", json!({"path": p.to_string_lossy()})).is_some()
+                {
+                    app.toast(i18n::trf("Saved {name}", &[("name", &p.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default())]));
+                }
+            }),
+        );
     }
 
     pub fn save(&mut self) {
-        // A branch tab saves its main file.
+        if !self.desktop_document_write() {
+            return;
+        }
         let tab = figcraft_engine::branches::file_tab(&self.session);
         if self.session.docs.get(tab).is_some_and(|d| d.path.is_some()) {
             if self.run("file.save", json!({})).is_some() {
@@ -867,14 +887,19 @@ impl FigApp {
     }
 
     pub fn open_dialog(&mut self) {
-        if let Some(p) =
-            self.services.pick_open(i18n::tr("Open"), &["figcraft", "fig", "json", "svg", "png", "jpg", "jpeg", "webp", "gif", "tif", "tiff"])
-        {
-            let ps = p.to_string_lossy().to_string();
-            if self.run("file.open", json!({"path": ps})).is_some() {
-                self.ui.home = false;
-            }
-        }
+        use platform_requests::{Operation, Payload};
+        let picker = Self::picker(i18n::tr("Open"), None, &["figcraft", "fig", "json", "svg", "png", "jpg", "jpeg", "webp", "gif", "tif", "tiff"]);
+        self.request_platform(
+            None,
+            Operation::OpenCopy(picker),
+            Box::new(|app, payload| {
+                if let Payload::Selected(copy) = payload
+                    && app.run("file.open", json!({"path": copy.path.to_string_lossy()})).is_some()
+                {
+                    app.ui.home = false;
+                }
+            }),
+        );
     }
 
     pub fn import_dialog(&mut self, place: bool) {
@@ -883,10 +908,32 @@ impl FigApp {
         } else {
             &["svg", "png", "jpg", "jpeg", "webp", "gif", "tif", "tiff", "figcraft", "fig"]
         };
-        if let Some(p) = self.services.pick_open(if place { i18n::tr("Place image") } else { i18n::tr("Import") }, exts) {
-            let ps = p.to_string_lossy().to_string();
-            self.run("file.import", json!({"path": ps}));
-        }
+        let selection = self.session.ds().map(|v| v.selection.clone()).unwrap_or_default();
+        let page = self.session.ds().ok().map(|d| d.page);
+        self.import_copy(
+            if place { i18n::tr("Place image") } else { i18n::tr("Import") },
+            exts,
+            Box::new(move |app, path| {
+                let previous = app.session.ds().ok().map(|d| (d.page, d.selection.clone()));
+                if let Some(page) = page {
+                    if !app.session.doc().is_ok_and(|d| d.node(page).is_some()) {
+                        app.platform_error("Import target page no longer exists");
+                        return;
+                    }
+                    if let Ok(ds) = app.session.ds_mut() {
+                        ds.page = page;
+                        ds.selection = selection;
+                    }
+                }
+                if app.run("file.import", json!({"path": path.to_string_lossy()})).is_none()
+                    && let Some((page, selection)) = previous
+                    && let Ok(ds) = app.session.ds_mut()
+                {
+                    ds.page = page;
+                    ds.selection = selection;
+                }
+            }),
+        );
     }
 
     /// Reduced motion: the preference or the system's setting.
@@ -923,6 +970,7 @@ impl FigApp {
 
     /// Per-frame logic that doesn't draw (control requests, theme, language).
     pub fn logic(&mut self, ctx: &egui::Context) {
+        self.platform_context = ctx.clone();
         self.poll_platform_requests(ctx);
         if self.language.as_ref() != Some(&self.session.prefs.language) {
             i18n::set(&self.session.prefs.language, self.services.system_language().as_deref());

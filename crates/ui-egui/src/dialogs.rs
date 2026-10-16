@@ -464,15 +464,22 @@ fn color_profile_dialog(app: &mut FigApp, ctx: &Context) {
 
 /// Save the whole file as `.fig`; the toast says how much was left out.
 fn save_fig(app: &mut FigApp, name: &str) {
-    let Some(p) = app.services.pick_save(tr("Export"), &format!("{name}.fig"), &["fig"]) else { return };
-    let file = p.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
-    if let Some(r) = app.run("file.export", json!({"format": "fig", "path": p.to_string_lossy()})) {
-        let left_out = r["warnings"].as_array().map_or(0, Vec::len);
-        app.toast(match left_out {
-            0 => trf("Exported {name}", &[("name", &file)]),
-            n => trn("Exported {name}; {n} kinds of content were left out", n, &[("name", &file)]),
-        });
-    }
+    let file = format!("{name}.fig");
+    let label = file.clone();
+    app.export_snapshot(
+        tr("Export"),
+        "file.export",
+        json!({"format": "fig"}),
+        &file,
+        "fig",
+        Box::new(move |app, r| {
+            let left_out = r["warnings"].as_array().map_or(0, Vec::len);
+            app.toast(match left_out {
+                0 => trf("Exported {name}", &[("name", &label)]),
+                n => trn("Exported {name}; {n} kinds of content were left out", n, &[("name", &label)]),
+            });
+        }),
+    );
 }
 
 /// What the Export dialog was asked to do.

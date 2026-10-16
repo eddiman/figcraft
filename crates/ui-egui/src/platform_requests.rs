@@ -122,6 +122,8 @@ pub struct Completion {
 }
 
 pub type PlatformDone = Box<dyn FnOnce(&mut FigApp, Payload)>;
+pub(crate) type ImportDone = Box<dyn FnOnce(&mut FigApp, &Path)>;
+pub(crate) type ExportDone = Box<dyn FnOnce(&mut FigApp, serde_json::Value)>;
 #[derive(Clone, Copy)]
 enum Expected {
     Selected,
@@ -143,6 +145,92 @@ fn allocate_id(counter: &AtomicU64) -> Result<RequestId, RejectReason> {
 }
 
 impl FigApp {
+    pub(crate) fn platform_command_allowed(&mut self, command: &str, params: &serde_json::Value) -> bool {
+        let caps = self.services.capabilities();
+        let denied = match command {
+            "plugin.directory.install" => !caps.plugin_downloads,
+            "plugin.import" => caps.document_mode != crate::platform::DocumentMode::DesktopPaths && params.get("path").is_some(),
+            "collab.host" => !caps.local_session_hosting,
+            "collab.share" => !caps.local_session_hosting && params["via"].as_str().map(str::trim) == Some("local"),
+            "file.save" | "file.saveAs" => caps.document_mode != crate::platform::DocumentMode::DesktopPaths,
+            _ => false,
+        };
+        if denied {
+            self.platform_error(&format!("{command} is unsupported on this platform"));
+        }
+        !denied
+    }
+
+    pub(crate) fn picker(title: &str, suggested_name: Option<String>, extensions: &[&str]) -> PickerSpec {
+        PickerSpec { title: title.into(), suggested_name, extensions: extensions.iter().map(|s| (*s).into()).collect() }
+    }
+
+    pub(crate) fn platform_document(&self) -> Option<DocumentRef> {
+        self.session.ds().ok().map(|d| DocumentRef { uid: d.uid })
+    }
+
+    pub(crate) fn platform_error(&mut self, message: &str) {
+        self.toast(message);
+        self.ui.last_error = Some(message.into());
+    }
+
+    pub(crate) fn desktop_document_write(&mut self) -> bool {
+        if self.services.capabilities().document_mode == crate::platform::DocumentMode::DesktopPaths {
+            true
+        } else {
+            self.platform_error("Saving documents is unsupported on this platform until durable saving is available");
+            false
+        }
+    }
+
+    pub(crate) fn request_platform(&mut self, document: Option<DocumentRef>, operation: Operation, done: PlatformDone) {
+        let ctx = self.platform_context.clone();
+        let _ = self.submit_platform_request(&ctx, document, operation, done);
+    }
+
+    pub(crate) fn import_copy(&mut self, title: &str, extensions: &[&str], done: ImportDone) {
+        let picker = Self::picker(title, None, extensions);
+        self.request_platform(
+            self.platform_document(),
+            Operation::ImportCopy(picker),
+            Box::new(move |app, payload| {
+                if let Payload::Selected(copy) = payload {
+                    // Retain the imported lease through synchronous consumption. Native adapters must
+                    // promote inputs whose paths the engine retains before delivering SelectedCopy.
+                    done(app, &copy.path);
+                }
+            }),
+        );
+    }
+
+    /// Encode at activation, before a delayed picker can observe later edits or selection.
+    pub(crate) fn export_snapshot(&mut self, title: &str, command: &str, mut params: serde_json::Value, name: &str, ext: &str, done: ExportDone) {
+        let stage = match StagingLease::create(&std::env::temp_dir()) {
+            Ok(stage) => stage,
+            Err(e) => {
+                self.platform_error(&e.to_string());
+                return;
+            }
+        };
+        // A single-file picker suggests only a basename, as the existing export UI does.
+        let name = name.rsplit(['/', '\\']).next().filter(|s| !s.is_empty()).unwrap_or("Untitled");
+        let file = match stage.file(name.into()) {
+            Ok(file) => file,
+            Err(reason) => {
+                self.platform_rejected(&reason);
+                return;
+            }
+        };
+        params["path"] = serde_json::json!(file.path.to_string_lossy());
+        let Some(result) = self.run(command, params) else { return };
+        let picker = Self::picker(title, Some(name.into()), &[ext]);
+        self.request_platform(
+            self.platform_document(),
+            Operation::ExportFiles { picker, files: vec![file] },
+            Box::new(move |app, _| done(app, result)),
+        );
+    }
+
     /// Submit owned work. The success closure runs only for a valid, live target.
     pub fn submit_platform_request(
         &mut self,

@@ -318,11 +318,30 @@ pub(crate) fn export_layers(app: &mut FigApp, ids: &[NodeId], assets: bool) {
         // The suggested name keeps only the file's own name (a layer's folders apply to folders).
         [one] => save_one(app, &[one.id], &one.setting, one.file.rsplit('/').next().unwrap_or(&one.file)),
         _ => {
-            let Some(dir) = app.services.pick_folder(tr("Export")) else { return };
-            if let Some(r) = app.run("file.exportLayers", json!({"ids": ids, "dir": dir.to_string_lossy(), "assets": assets})) {
-                let n = r["files"].as_array().map_or(0, Vec::len);
-                app.toast(trn("Exported {n} files", n, &[]));
-            }
+            use crate::platform_requests::{Operation, StagingLease};
+            let stage = match StagingLease::create(&std::env::temp_dir()) {
+                Ok(stage) => stage,
+                Err(e) => {
+                    app.platform_error(&e.to_string());
+                    return;
+                }
+            };
+            let Some(result) = app.run("file.exportLayers", json!({"ids": ids, "dir": stage.root(), "assets": assets})) else { return };
+            let paths = result["files"].as_array().into_iter().flatten().filter_map(|f| f["name"].as_str().map(str::to_string)).collect();
+            let tree = match crate::platform_export_tree::ExportTree::new(stage, paths) {
+                Ok(tree) => tree,
+                Err(e) => {
+                    app.platform_error(&format!("Invalid export tree: {e:?}"));
+                    return;
+                }
+            };
+            let n = tree.paths().len();
+            let picker = FigApp::picker(tr("Export"), None, &[]);
+            app.request_platform(
+                app.platform_document(),
+                Operation::ExportTree { picker, tree },
+                Box::new(move |app, _| app.toast(trn("Exported {n} files", n, &[]))),
+            );
         }
     }
 }
@@ -330,14 +349,19 @@ pub(crate) fn export_layers(app: &mut FigApp, ids: &[NodeId], assets: bool) {
 /// Export `ids` together as one file with `setting`, through a save dialog suggesting `file`.
 pub(crate) fn save_one(app: &mut FigApp, ids: &[NodeId], setting: &ExportSetting, file: &str) {
     let ext = setting.format.ext();
-    let Some(p) = app.services.pick_save(tr("Export"), file, &[ext]) else { return };
-    let path = p.to_string_lossy().to_string();
     let mut params = setting_params(setting);
     params["ids"] = json!(ids);
-    params["path"] = json!(path);
-    if app.run("file.export", params).is_some() {
-        app.toast(trf("Exported {name}", &[("name", &p.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default())]));
-    }
+    let name = file.to_string();
+    app.export_snapshot(
+        tr("Export"),
+        "file.export",
+        params,
+        file,
+        ext,
+        Box::new(move |app, _| {
+            app.toast(trf("Exported {name}", &[("name", &name)]));
+        }),
+    );
 }
 
 /// The file name a one-off export of `ids` suggests: the first layer's name (or `fallback`) with

@@ -124,10 +124,19 @@ fn run(app: &mut FigApp, cmd: &str, params: Value) {
 
 /// Plugins ▸ Development ▸ Import plugin from manifest…: pick a `figcraft-plugin.json`.
 pub fn import_dialog(app: &mut FigApp) {
-    let Some(p) = app.services.pick_open(tr("Import plugin from manifest"), &["json"]) else { return };
-    if let Some(v) = app.run("plugin.import", json!({"path": p.to_string_lossy()})) {
-        app.toast(trf("Imported {name}", &[("name", &v["name"].as_str().unwrap_or(tr("the plugin")))]));
+    if app.services.capabilities().document_mode != crate::platform::DocumentMode::DesktopPaths {
+        app.platform_error("Importing a local plugin manifest is unsupported on this platform");
+        return;
     }
+    app.import_copy(
+        tr("Import plugin from manifest"),
+        &["json"],
+        Box::new(|app, path| {
+            if let Some(v) = app.run("plugin.import", json!({"path": path.to_string_lossy()})) {
+                app.toast(trf("Imported {name}", &[("name", &v["name"].as_str().unwrap_or(tr("the plugin")))]));
+            }
+        }),
+    );
 }
 
 /// The installed plugins at the top of the Plugins menu: a plugin with one command is an item, one
@@ -462,7 +471,8 @@ fn confirm_window(app: &mut FigApp, ctx: &Context, t: &Tokens) {
             if installing {
                 widgets::label(ui, tr("Installing…"), t.text_secondary);
             } else {
-                install = widgets::button(ui, if update { tr("Update") } else { tr("Install") }, true, true).clicked();
+                install = widgets::button(ui, if update { tr("Update") } else { tr("Install") }, true, app.services.capabilities().plugin_downloads)
+                    .clicked();
             }
             cancel = widgets::button(ui, tr("Cancel"), false, true).clicked();
         });
