@@ -6,6 +6,9 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod a11y;
+pub mod adaptive;
+#[cfg(test)]
+mod adaptive_tests;
 pub mod assets_panel;
 pub mod bidi;
 pub mod branch_ui;
