@@ -185,14 +185,17 @@ fn cursor_across(app: &FigApp, g: &Placed, r: Rect) -> egui::CursorIcon {
 
 /// Pointer handling; returns true when the event belongs to a ruler or guide.
 pub fn input(app: &mut FigApp, ctx: &egui::Context, pos: Pos2) -> bool {
+    input_value(app, ctx, crate::canvas::PointerInput::from_context(ctx, Some(pos), true))
+}
+
+pub(crate) fn input_value(app: &mut FigApp, ctx: &egui::Context, input: crate::canvas::PointerInput) -> bool {
     app.canvas_pointer_preflight(ctx);
+    let Some(pos) = input.pos else { return false };
     if !rulers_on(app) {
         return false;
     }
     let r = app.canvas.rect;
-    let (pressed, released, alt) = ctx.input(|i| {
-        (i.pointer.button_pressed(egui::PointerButton::Primary), i.pointer.button_released(egui::PointerButton::Primary), i.modifiers.alt)
-    });
+    let (pressed, released, alt) = (input.pressed, input.released, input.modifiers.alt);
     if let Some(drag) = ctx.data(|d| d.get_temp::<GuideDrag>(drag_id())) {
         let vertical = match drag {
             GuideDrag::New { vertical, .. } | GuideDrag::Move { vertical, .. } => vertical,

@@ -447,16 +447,31 @@ fn toggle(app: &mut FigApp, id: u64) {
     }
 }
 
+/// Commit-only comment creation must still permit dragging an existing pin.
+/// Use the same visible spots and hit rectangles as the pointer handler.
+pub(crate) fn pointer_hit(app: &FigApp, pos: Pos2) -> bool {
+    visible(app)
+        && spots(app).iter().rev().any(|spot| match spot {
+            Spot::One(pin) => pin_rect(pin.at).contains(pos),
+            Spot::Many(ids, at) => cluster_rect(*at, ids.len()).contains(pos),
+        })
+}
+
 /// Pointer handling: a pin click opens its thread, dragging your pin moves it (onto the frame
 /// under it), a cluster click zooms in until its pins come apart. Returns true when the comments
 /// own the pointer.
 pub fn input(app: &mut FigApp, ctx: &egui::Context, pos: Pos2) -> bool {
+    input_value(app, ctx, crate::canvas::PointerInput::from_context(ctx, Some(pos), true))
+}
+
+pub(crate) fn input_value(app: &mut FigApp, ctx: &egui::Context, input: crate::canvas::PointerInput) -> bool {
     app.canvas_pointer_preflight(ctx);
+    let Some(pos) = input.pos else { return false };
     if !visible(app) {
         app.ui.comments.drag = None;
         return false;
     }
-    let (pressed, down) = ctx.input(|i| (i.pointer.primary_pressed(), i.pointer.primary_down()));
+    let (pressed, down) = (input.pressed, input.down);
     if let Some(mut d) = app.ui.comments.drag.take() {
         if down {
             d.moved |= d.mine && (pos - d.from).length() > DRAG_SLOP;

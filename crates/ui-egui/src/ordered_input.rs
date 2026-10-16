@@ -22,13 +22,15 @@ pub enum Interruption {
 pub trait CanvasConsumer {
     fn contact(&mut self, app: &mut FigApp, ctx: &Context, contact: &Contact);
     fn interrupt(&mut self, app: &mut FigApp, ctx: &Context, why: Interruption);
+    /// Mirrors the normalizer's explicit focus reset; layout changes retain IDs.
+    fn producer_reset(&mut self, app: &mut FigApp, ctx: &Context);
     fn finish_frame(&mut self, app: &mut FigApp, ctx: &Context, timestamp: Option<(f64, Clock, u64)>);
 }
 
 /// A completed layout's source identity, separate from frozen contact ownership.
 /// The caller's classifier must also exclude panel/overlay hit regions from that
 /// completed layout. Rotation or another layout revision requires a new target.
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct Target {
     uid: u64,
     page: NodeId,
@@ -48,6 +50,9 @@ impl Target {
         if app.canvas_interruption.is_none() || !app.canvas.rect.is_finite() || !app.canvas.rect.is_positive() || blocked_ui(app) {
             return None;
         }
+        if !ctx.input(|i| i.viewport_rect().is_finite()) {
+            return None;
+        }
         Some(Self {
             uid: ds.uid,
             page: ds.page,
@@ -61,6 +66,17 @@ impl Target {
             window: app.windows.current,
             modal: ctx.memory(|m| m.top_modal_layer()),
         })
+    }
+    pub(crate) fn with_layout(mut self, layout: u64) -> Self {
+        self.layout = layout;
+        self
+    }
+    pub(crate) fn same_geometry(&self, other: &Self) -> bool {
+        let mut a = self.clone();
+        let mut b = other.clone();
+        a.layout = 0;
+        b.layout = 0;
+        a == b
     }
     pub fn owner(&self) -> Owner {
         Owner::Canvas { uid: self.uid, layout: self.layout }
@@ -225,7 +241,12 @@ impl Boundary {
             index += 1;
             keep
         });
-        consumer.finish_frame(app, ctx, frame.timestamp);
+        if !raw.focused || raw.events.iter().any(|event| matches!(event, Event::WindowFocused(false))) {
+            self.held.clear();
+            consumer.producer_reset(app, ctx);
+        } else {
+            consumer.finish_frame(app, ctx, frame.timestamp);
+        }
         self.last_interruption = app.canvas_interruption;
         frame
     }

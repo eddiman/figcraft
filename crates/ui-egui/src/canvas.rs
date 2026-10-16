@@ -14,14 +14,42 @@ use crate::i18n::{tr, trf, trn};
 use crate::render_worker::{Job, Worker};
 use crate::theme::{ACCENT, COMPONENT, Tokens, doc_c32, regular, semibold};
 
+/// One explicit pointer value. Legacy wrappers read it from egui; the native
+/// consumer supplies it from ordered value events without synthetic reinjection.
+#[derive(Clone, Copy)]
+pub(crate) struct PointerInput {
+    pub pos: Option<Pos2>,
+    pub pressed: bool,
+    pub down: bool,
+    pub released: bool,
+    pub modifiers: egui::Modifiers,
+    pub hovered: bool,
+}
+impl PointerInput {
+    pub(crate) fn from_context(ctx: &egui::Context, pos: Option<Pos2>, hovered: bool) -> Self {
+        ctx.input(|i| Self {
+            pos,
+            pressed: i.pointer.button_pressed(egui::PointerButton::Primary),
+            down: i.pointer.primary_down(),
+            released: i.pointer.button_released(egui::PointerButton::Primary),
+            modifiers: i.modifiers,
+            hovered,
+        })
+    }
+}
+
 pub struct CanvasState {
     pub rect: Rect,
+    pub(crate) input_layer: Option<egui::LayerId>,
+    pub(crate) input_source: Option<(u64, NodeId)>,
     texture: Option<egui::TextureHandle>,
     tex_view: Option<figcraft_render::View>,
     submitted: Option<JobKey>,
     /// What the last canvas render had to do (shown by `ui.inspect`).
     pub render_work: Option<figcraft_render::Work>,
     dragging: bool,
+    /// An explicit value owns every release, including releases handled by overlays.
+    value_owned: bool,
     space_pan: bool,
     middle_pan: Option<(Pos2, f64, f64)>,
     /// The zoom tool (Z held): zooming out (Alt) or in, and where its drag started.
@@ -42,6 +70,7 @@ pub struct CanvasState {
 impl CanvasState {
     pub(crate) fn cancel_pointer(&mut self) {
         self.dragging = false;
+        self.value_owned = false;
         self.space_pan = false;
         self.middle_pan = None;
         self.zoom_tool = None;
@@ -57,11 +86,14 @@ impl Default for CanvasState {
     fn default() -> Self {
         Self {
             rect: Rect::NOTHING,
+            input_layer: None,
+            input_source: None,
             texture: None,
             tex_view: None,
             submitted: None,
             render_work: None,
             dragging: false,
+            value_owned: false,
             space_pan: false,
             middle_pan: None,
             cursor: None,
@@ -168,6 +200,7 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
         app.cancel_canvas_pointer();
     }
     app.canvas.rect = rect;
+    app.canvas.input_layer = Some(ui.layer_id());
     let ppp = ctx.pixels_per_point();
     let resp = ui.interact(rect, ui.id().with("canvas"), Sense::click_and_drag());
     let key_box = app.ui.key_box;
@@ -186,6 +219,7 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
             ds.zoom_to_fit();
         }
     }
+    app.canvas.input_source = app.session.ds().ok().map(|ds| (ds.uid, ds.page));
     let own_cursor = input(app, ui, &resp);
     crate::live::track_pointer(app, &ctx);
     app.sync_preedit();
@@ -368,7 +402,7 @@ fn zoom_tool(app: &mut FigApp, ui: &Ui, resp: &egui::Response, pos: Pos2, mods: 
 /// then doesn't show.
 fn input(app: &mut FigApp, ui: &mut Ui, resp: &egui::Response) -> bool {
     app.canvas_pointer_preflight(ui.ctx());
-    if app.canvas_input_blocked {
+    if app.canvas_input_blocked || app.canvas.value_owned {
         return true;
     }
     if crate::proto_canvas::input(app, ui, resp) {
@@ -522,6 +556,75 @@ fn input(app: &mut FigApp, ui: &mut Ui, resp: &egui::Response) -> bool {
         app.handle_ui_requests();
     }
     true
+}
+
+/// Dispatch one enrolled value through the same on-canvas owners as legacy
+/// input. Hover may run without enrollment; editing never falls back to an
+/// unowned engine call after cancellation or an error.
+pub fn pointer_value(
+    app: &mut FigApp,
+    ctx: &egui::Context,
+    kind: PointerKind,
+    pos: Pos2,
+    modifiers: egui::Modifiers,
+    pressure: Option<f32>,
+) -> figcraft_engine::Result<()> {
+    app.canvas_pointer_preflight(ctx);
+    if kind != PointerKind::Hover && app.canvas_pointer.is_none() {
+        return Err(figcraft_engine::EngineError::Disabled("pointer.gesture".into(), "value pointer is no longer enrolled".into()));
+    }
+    if !pos.x.is_finite() || !pos.y.is_finite() || pressure.is_some_and(|p| !p.is_finite()) {
+        app.cancel_canvas_pointer();
+        return Err(figcraft_engine::EngineError::Disabled("pointer.gesture".into(), "nonfinite pointer value".into()));
+    }
+    if kind != PointerKind::Hover {
+        app.canvas.value_owned = true;
+    }
+    if kind == PointerKind::Down {
+        app.ui.context_menu = None;
+        app.ui.tool_flyout = None;
+        app.take_canvas_keyboard(ctx);
+    }
+    let input = PointerInput {
+        pos: Some(pos),
+        pressed: kind == PointerKind::Down,
+        down: matches!(kind, PointerKind::Down | PointerKind::Move),
+        released: kind == PointerKind::Up,
+        modifiers,
+        hovered: app.canvas.rect.contains(pos),
+    };
+    app.canvas.pressure = pressure.map(|p| p.clamp(0.0, 1.0));
+    app.canvas.last_pointer = Some(app.to_page(pos));
+    let handled = crate::proto_canvas::input_value(app, ctx, input)
+        || (!app.canvas.dragging
+            && (crate::comments::input_value(app, ctx, input)
+                || crate::guides::input_value(app, ctx, input)
+                || crate::handles::input_value(app, ctx, input)));
+    if handled {
+        if kind != PointerKind::Hover && app.canvas_pointer.is_none() {
+            return Err(figcraft_engine::EngineError::Disabled(
+                "pointer.gesture".into(),
+                "value pointer owner was cancelled by its UI handler".into(),
+            ));
+        }
+        return Ok(());
+    }
+    if app.canvas_pointer.is_none() && kind != PointerKind::Hover {
+        return Err(figcraft_engine::EngineError::Disabled("pointer.gesture".into(), "value pointer owner was cancelled by its UI handler".into()));
+    }
+    match kind {
+        PointerKind::Down => {
+            app.canvas.dragging = true;
+        }
+        PointerKind::Move | PointerKind::Up if !app.canvas.dragging => return Ok(()),
+        PointerKind::Up | PointerKind::DoubleClick => app.canvas.dragging = false,
+        _ => {}
+    }
+    let event = pointer_event(app, kind, pos, &modifiers);
+    if kind == PointerKind::Up {
+        app.canvas.pressure = None;
+    }
+    app.pointer_session(|session| session.pointer(&event))
 }
 
 /// Right-click at screen `pos`: select what's under the pointer (`deep`: the nested layer), then

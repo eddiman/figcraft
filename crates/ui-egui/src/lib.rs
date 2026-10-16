@@ -67,7 +67,9 @@ pub mod style_picker;
 pub mod tabs;
 pub mod theme;
 pub mod toolbar;
+pub mod touch;
 pub mod touch_events;
+pub mod touch_native;
 pub mod typography;
 pub mod variable_ui;
 pub mod variables_panel;
@@ -1059,6 +1061,7 @@ impl FigApp {
         #[cfg(not(target_arch = "wasm32"))]
         let t0 = std::time::Instant::now();
         let ctx = ui.ctx().clone();
+        self.canvas.input_source = None;
         self.frame_stats.record(&ctx);
         let first = !self.fonts_installed;
         self.logic(&ctx);

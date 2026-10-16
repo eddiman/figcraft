@@ -118,3 +118,41 @@ Both iOS target checks and the simulator link passed. The iPad Air 11 M3 simulat
 rendered the synthetic document; tapping the smoke field and typing T34 showed
 exactly three characters. The captured runtime log had no unsupported-touch
 warning or panic. This is simulator evidence; physical input remains deferred.
+
+
+## 2026-10-17: T16 finger arbitration and shared pointer values, in progress
+
+The pure recognizer retains the original Start until a drag exceeds six logical
+points, accepts a tap on End, and opens the existing context menu after 500 ms.
+A second canvas finger cancels the owned preview before establishing the pinch
+anchor. Losing either finger or adding a third suppresses the remaining contacts
+until they lift. Navigation changes the view without recording document undo.
+Commit-only comment creation and Eyedropper intent wait for an accepted tap;
+existing comment pins retain their drag policy. Unknown contacts follow finger policy even when pressure is present.
+
+The opt-in finger host dispatches explicit values through the existing prototype,
+comment, guide, handle and engine interpretation. The ordinary wrappers continue
+to read egui input. A regression exposed a prototype release on the next frame
+because egui had no primary button down for a value-owned gesture. The canvas now
+keeps explicit ownership until its explicit Up or cancellation, including overlay
+drags. Accepted overlay Down also takes canvas keyboard ownership. Contact
+modifiers follow raw event order. Focus reset clears the consumer's identities
+alongside the producer; ordinary interruptions retain held suppression.
+
+Completed-layout snapshots identify the canvas source and allocation, exclude
+panels, the floating toolbar and foreground layers, and refuse stale source maps.
+Document previews and view transforms retain the layout epoch. Software tests
+exercise recognizer thresholds, raw suffix removal, actual preview rollback,
+anchored pinch, comment creation/pin movement, exactly-once drawing, long press,
+and 98 combinations of 14 tools and seven interruptions. The full UI suite passes
+with 463 tests and one ignored test. Full CI passes with 2,395 tests, zero
+failures and eight ignored tests. Both iOS targets compile and the simulator
+app links. The rebuilt simulator editor renders and accepts the smoke-field
+text T16 exactly once. The matrix covers draws, marquee and Hand;
+specialized vector/text/handle/prototype fixtures remain to complete T16.
+
+T16 remains in progress. Shell::raw_input_hook still uses Observe, so these APIs
+do not activate native touch editing. Independent physical mouse dispatch,
+aggregate panel-touch zoom policy and the remaining integration matrix must be
+completed before activation. Device qualification remains deferred. No native
+bridge, dependency, asset, persistence or collaboration change is included.

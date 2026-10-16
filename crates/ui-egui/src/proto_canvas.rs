@@ -216,8 +216,12 @@ pub fn draw(app: &FigApp, painter: &egui::Painter) {
 /// Canvas input while the Prototype tab is open. Returns true when it consumed the gesture
 /// (dragging from a connection handle, or clicking a noodle).
 pub fn input(app: &mut FigApp, ui: &egui::Ui, resp: &egui::Response) -> bool {
-    let ctx = ui.ctx().clone();
-    app.canvas_pointer_preflight(&ctx);
+    let ctx = ui.ctx();
+    input_value(app, ctx, crate::canvas::PointerInput::from_context(ctx, ctx.input(|i| i.pointer.hover_pos()), resp.hovered()))
+}
+
+pub(crate) fn input_value(app: &mut FigApp, ctx: &egui::Context, input: crate::canvas::PointerInput) -> bool {
+    app.canvas_pointer_preflight(ctx);
     let drag: Option<Drag> = ctx.data(|d| d.get_temp(drag_id()));
     if !active(app) {
         if drag.is_some() {
@@ -225,14 +229,7 @@ pub fn input(app: &mut FigApp, ui: &egui::Ui, resp: &egui::Response) -> bool {
         }
         return false;
     }
-    let (pos, pressed, down, released) = ctx.input(|i| {
-        (
-            i.pointer.hover_pos(),
-            i.pointer.button_pressed(egui::PointerButton::Primary),
-            i.pointer.primary_down(),
-            i.pointer.button_released(egui::PointerButton::Primary),
-        )
-    });
+    let (pos, pressed, down, released) = (input.pos, input.pressed, input.down, input.released);
     let Ok(ds) = app.session.ds() else { return false };
     let (doc, page, sel) = (ds.doc.clone(), ds.page, ds.selection.clone());
     if let Some(mut d) = drag {
@@ -247,7 +244,7 @@ pub fn input(app: &mut FigApp, ui: &egui::Ui, resp: &egui::Response) -> bool {
                 && let Some(r) = app.pointer_command("proto.interaction.add", json!({"ids": [d.source], "dest": dest}))
             {
                 let k = r.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
-                crate::proto_panel::open_editor(&ctx, Some((d.source, k)));
+                crate::proto_panel::open_editor(ctx, Some((d.source, k)));
             }
         } else {
             ctx.data_mut(|m| m.insert_temp(drag_id(), d));
@@ -255,7 +252,7 @@ pub fn input(app: &mut FigApp, ui: &egui::Ui, resp: &egui::Response) -> bool {
         return true;
     }
     let Some(pos) = pos.filter(|p| app.canvas.rect.contains(*p)) else { return false };
-    if !resp.hovered() || ds.text_edit.is_some() {
+    if !input.hovered || ds.text_edit.is_some() {
         return false;
     }
     let over_handle = handles(app, &doc, &sel).into_iter().find(|(_, c)| c.distance(pos) <= HANDLE_R + 3.0);
@@ -269,7 +266,7 @@ pub fn input(app: &mut FigApp, ui: &egui::Ui, resp: &egui::Response) -> bool {
         ctx.data_mut(|m| m.insert_temp(drag_id(), Drag { source, from, pos }));
         return true;
     }
-    let hit = noodles(app, &ctx, &doc, page)
+    let hit = noodles(app, ctx, &doc, page)
         .into_iter()
         .filter(|n| bezier_distance(&n.pts, pos) < 5.0)
         .min_by(|a, b| bezier_distance(&a.pts, pos).total_cmp(&bezier_distance(&b.pts, pos)));
@@ -278,7 +275,7 @@ pub fn input(app: &mut FigApp, ui: &egui::Ui, resp: &egui::Response) -> bool {
             session.set_selection(vec![n.source]);
             Ok(())
         });
-        crate::proto_panel::open_editor(&ctx, Some((n.source, n.index)));
+        crate::proto_panel::open_editor(ctx, Some((n.source, n.index)));
         return true;
     }
     false
@@ -317,5 +314,33 @@ mod pointer_cancel_tests {
             let resp = ui.interact(a.canvas.rect, ui.id().with("canvas"), egui::Sense::click_and_drag());
             input(a, ui, &resp);
         });
+    }
+}
+
+#[cfg(test)]
+mod value_input_tests {
+    use super::*;
+    use crate::layers_drag_tests::Ui;
+    use figcraft_engine::{Session, tools::PointerKind};
+    #[test]
+    fn ipad_touch_prototype_value_drag_waits_for_its_explicit_up() {
+        let mut session = Session::new();
+        session.execute("shape.rectangle", &json!({"x":100,"y":100,"width":100,"height":100})).unwrap();
+        let mut u = Ui::new(session);
+        u.app.ui.right_tab = RightTab::Prototype;
+        let ds = u.app.session.ds().unwrap();
+        let doc = ds.doc.clone();
+        let selection = ds.selection.clone();
+        let (_, from) = handles(&u.app, &doc, &selection).first().copied().unwrap();
+        let field = egui::Id::new("value prototype previous field");
+        u.ctx.memory_mut(|memory| memory.request_focus(field));
+        u.app.begin_canvas_pointer(&u.ctx).unwrap();
+        crate::canvas::pointer_value(&mut u.app, &u.ctx, PointerKind::Down, from, egui::Modifiers::NONE, None).unwrap();
+        assert!(u.ctx.data(|d| d.get_temp::<Drag>(drag_id())).is_some());
+        u.frame(vec![]);
+        assert!(u.ctx.data(|d| d.get_temp::<Drag>(drag_id())).is_some(), "no legacy !down release may finish a value-owned drag");
+        crate::canvas::pointer_value(&mut u.app, &u.ctx, PointerKind::Up, from, egui::Modifiers::NONE, None).unwrap();
+        u.app.finish_canvas_pointer().unwrap();
+        assert!(u.ctx.data(|d| d.get_temp::<Drag>(drag_id())).is_none());
     }
 }

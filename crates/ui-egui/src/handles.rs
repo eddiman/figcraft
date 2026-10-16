@@ -372,15 +372,13 @@ pub fn draw(app: &FigApp, painter: &egui::Painter) {
 
 /// Pointer handling; returns true when a handle owns the pointer this frame.
 pub fn input(app: &mut FigApp, ctx: &egui::Context, pos: Pos2) -> bool {
+    input_value(app, ctx, crate::canvas::PointerInput::from_context(ctx, Some(pos), true))
+}
+
+pub(crate) fn input_value(app: &mut FigApp, ctx: &egui::Context, input: crate::canvas::PointerInput) -> bool {
     app.canvas_pointer_preflight(ctx);
-    let (pressed, down, released, shift) = ctx.input(|i| {
-        (
-            i.pointer.button_pressed(egui::PointerButton::Primary),
-            i.pointer.primary_down(),
-            i.pointer.button_released(egui::PointerButton::Primary),
-            i.modifiers.shift,
-        )
-    });
+    let Some(pos) = input.pos else { return false };
+    let (pressed, down, released, shift) = (input.pressed, input.down, input.released, input.modifiers.shift);
     let dragging: Option<Drag> = ctx.data(|d| d.get_temp(drag_id()));
     if let Some(drag) = dragging {
         if down {

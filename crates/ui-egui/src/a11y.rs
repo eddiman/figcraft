@@ -127,6 +127,10 @@ pub struct Nav {
 }
 
 impl Nav {
+    /// Completed drawing records for input ownership at the next raw-input hook.
+    pub(crate) fn input_regions(&self) -> [Option<Rect>; 4] {
+        self.next.rects
+    }
     /// Move the keyboard `step` regions on (`view.nextRegion` / `view.previousRegion`).
     pub fn step(&mut self, step: i32) {
         self.pending = Some(match self.pending {

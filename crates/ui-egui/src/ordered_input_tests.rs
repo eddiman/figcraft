@@ -73,6 +73,9 @@ impl CanvasConsumer for Editor {
         self.current = None;
         self.interruptions.push(why);
     }
+    fn producer_reset(&mut self, app: &mut FigApp, ctx: &Context) {
+        self.interrupt(app, ctx, Interruption::SourceOrLayout);
+    }
     fn finish_frame(&mut self, _: &mut FigApp, _: &Context, _: Option<(f64, Clock, u64)>) {}
 }
 
@@ -207,6 +210,9 @@ fn ipad_ordered_external_command_invalidates_a_pending_contact_without_a_checkpo
         fn interrupt(&mut self, _: &mut FigApp, _: &Context, _: Interruption) {
             self.cancelled |= self.pending;
             self.pending = false;
+        }
+        fn producer_reset(&mut self, app: &mut FigApp, ctx: &Context) {
+            self.interrupt(app, ctx, Interruption::SourceOrLayout);
         }
         fn finish_frame(&mut self, _: &mut FigApp, _: &Context, _: Option<(f64, Clock, u64)>) {}
     }

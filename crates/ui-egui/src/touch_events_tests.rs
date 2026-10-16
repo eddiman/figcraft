@@ -308,3 +308,27 @@ fn ipad_touch_unsupported_nonfinite_panel_and_pointer_values_never_enter_egui() 
     run(&ctx, input);
     assert!(!ctx.input(|i| i.pointer.primary_down()));
 }
+
+#[test]
+fn ipad_touch_contact_modifiers_follow_raw_order_within_one_frame() {
+    let mut n = Normalizer::default();
+    let p = pos2(20.0, 30.0);
+    let mut events = vec![Event::ModifiersChanged(Modifiers::SHIFT)];
+    events.extend(start(1, 9, p));
+    events.push(Event::ModifiersChanged(Modifiers::ALT));
+    events.push(touch(1, 9, TouchPhase::Move, p));
+    events.push(Event::PointerMoved(p));
+    let frame = n.process(&mut raw(events, 1.0), Routing::CanvasConsumer, canvas);
+    assert!(frame.issues.is_empty());
+    let contacts: Vec<_> = frame
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Contact(c) => Some(c),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(contacts.len(), 2);
+    assert_eq!(contacts[0].modifiers, Modifiers::SHIFT);
+    assert_eq!(contacts[1].modifiers, Modifiers::ALT);
+}
