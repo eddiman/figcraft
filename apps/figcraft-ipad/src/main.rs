@@ -1,6 +1,10 @@
 //! iOS entry point. Host workspace checks do not initialize the native host.
 #[cfg(target_os = "ios")]
 mod app;
+#[cfg(any(target_os = "ios", test))]
+mod documents;
+#[cfg(target_os = "ios")]
+mod services;
 
 #[cfg(target_os = "ios")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {

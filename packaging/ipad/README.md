@@ -61,3 +61,11 @@ cargo xtask ci
 ```
 
 The prerequisite checks simulate unavailable tools/targets through temporary wrappers rather than uninstalling anything. Physical-device checks are deferred by the user; simulator passes do not certify Pencil, VoiceOver, thermal/memory behavior or ten physical suspend/resume cycles. T03 creates development builds, not a qualified alpha or release candidate.
+
+## Native copy services (T07)
+
+The app installs IPadServices from apps/figcraft-ipad/src/services.rs. Open/import actions copy the selected input into a unique persistent Library/Application Support/FigCraft/Imports directory before the engine receives a path. Equal display names do not overwrite an earlier copy. Exporting a batch packages its declared relative paths into one staged folder named Export, then asks the system to copy that folder. Single exports copy their staged files. Native Save/Save As remain unsupported until durable persistence is connected by T10.
+
+The reviewed bridge lives in platform/apple-ipad, an isolated Rust workspace. Its private native.rs contains the D07 UIKit exception; shared/app safety lints remain unchanged. Root host CI does not run its standalone checks. With DEVELOPER_DIR set to the existing Xcode installation, run packaging/ipad/check-bridge.sh simulator and packaging/ipad/check-bridge.sh device in addition to the normal build checks. These commands test callback containment on the host and lint the target-specific bridge. They do not claim physical-device execution.
+
+The production Info.plist does not enable document-browser or in-place editing/file-sharing flags. Files are opened as copies. The isolated simulator probe used separate file-sharing flags only to expose its own synthetic fixtures; those flags are not part of this application.

@@ -1,0 +1,25 @@
+[package]
+name = "figcraft-apple-ipad"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+[workspace]
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2 = "=0.6.5"
+objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSArray", "NSEnumerator", "NSString", "NSURL", "NSObject", "NSFileCoordinator", "NSFilePresenter", "NSError", "NSPathUtilities", "block2"] }
+objc2-ui-kit = { version = "=0.3.2", default-features = false, features = ["std", "UIApplication", "UIWindow", "UIView", "UIViewController", "UIDocumentPickerViewController", "UIResponder", "UIScene", "UISceneDefinitions", "UIPresentationController", "UIWindowScene", "block2", "objc2-uniform-type-identifiers"] }
+objc2-uniform-type-identifiers = { version = "=0.3.2", default-features = false, features = ["std", "UTType"] }
+block2 = "=0.6.2"
+
+
+[lints.rust]
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

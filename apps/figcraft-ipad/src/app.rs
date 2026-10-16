@@ -2,17 +2,11 @@
 use std::error::Error;
 use std::io::Cursor;
 
+use crate::services::IPadServices;
 use figcraft_color::{ImageScaleMode, Paint};
 use figcraft_doc::{Document, NodeKind};
 use figcraft_engine::Session;
-use figcraft_ui_egui::{FigApp, Services};
-
-struct IPadServices;
-impl Services for IPadServices {
-    fn capabilities(&self) -> figcraft_ui_egui::platform::PlatformCapabilities {
-        figcraft_ui_egui::platform::PlatformCapabilities::ipad()
-    }
-}
+use figcraft_ui_egui::FigApp;
 
 /// The T01 small recipe, built with the upstream helper and an original generated image.
 fn small_fixture() -> Result<Document, Box<dyn Error>> {
@@ -39,6 +33,8 @@ impl eframe::App for Shell {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         ui.painter().rect_filled(ui.max_rect(), 0.0, ui.visuals().panel_fill);
         ui.add_space(ui.input(|i| i.safe_area_insets().0.top).max(32.0));
+        ui.label("Open imports a copy. Export creates a copy in Files.");
+        ui.separator();
         let mut move_fixture = false;
         if self.smoke {
             ui.horizontal(|ui| {
@@ -71,7 +67,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let smoke = std::env::args().any(|arg| arg == "--smoke");
     let session = if smoke { Session::with_document(small_fixture()?) } else { Session::new() };
-    let mut fig = FigApp::new(session, Box::new(IPadServices));
+    let mut fig = FigApp::new(session, Box::new(IPadServices::new()?));
     fig.ui.home = false;
     figcraft_ui_egui::windows::install(fig);
     let mut options = eframe::NativeOptions { renderer: eframe::Renderer::Wgpu, ..Default::default() };
