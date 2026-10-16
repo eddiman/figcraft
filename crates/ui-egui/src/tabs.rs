@@ -42,6 +42,7 @@ pub fn tab_bar(app: &mut FigApp, ui: &mut Ui) {
         }
         icons::paint(ui.painter(), Rect::from_center_size(hr.center(), vec2(16.0, 16.0)), Icon::Home, t.icon);
         if hresp.clicked() {
+            app.cancel_canvas_pointer();
             app.ui.home = true;
         }
         x += 44.0;

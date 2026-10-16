@@ -13,6 +13,7 @@ pub mod assets_panel;
 pub mod bidi;
 pub mod branch_ui;
 pub mod canvas;
+mod canvas_pointer;
 pub mod cjk;
 pub mod colorpicker;
 pub mod comments;
@@ -43,6 +44,7 @@ pub mod live_text;
 pub mod measure_overlay;
 pub mod menus;
 pub mod online;
+pub mod ordered_input;
 pub mod platform;
 pub mod platform_export_tree;
 #[cfg(test)]
@@ -65,6 +67,7 @@ pub mod style_picker;
 pub mod tabs;
 pub mod theme;
 pub mod toolbar;
+pub mod touch_events;
 pub mod typography;
 pub mod variable_ui;
 pub mod variables_panel;
@@ -558,6 +561,11 @@ pub struct FigApp {
     waiting: Vec<(String, Done)>,
     platform_requests: platform_requests::PendingRequests,
     platform_context: egui::Context,
+    canvas_pointer: Option<canvas_pointer::Owner>,
+    /// Host barriers also invalidate pending contacts that have no checkpoint.
+    canvas_interruption: Option<u64>,
+    /// Only a complete opted-in boundary sets this for unsupported input.
+    canvas_input_blocked: bool,
 }
 
 /// What to do with the result of a command run in the background.
@@ -587,6 +595,9 @@ impl FigApp {
             waiting: Vec::new(),
             platform_requests: platform_requests::PendingRequests::default(),
             platform_context: egui::Context::default(),
+            canvas_pointer: None,
+            canvas_interruption: Some(0),
+            canvas_input_blocked: false,
         }
     }
 
@@ -595,6 +606,7 @@ impl FigApp {
         if !self.platform_command_allowed(id, &params) {
             return None;
         }
+        self.cancel_canvas_pointer();
         let r = self.session.execute(id, &params);
         self.handle_ui_requests();
         self.cancel_closed_platform_requests();
@@ -617,6 +629,7 @@ impl FigApp {
         if !self.platform_command_allowed(id, &params) {
             return;
         }
+        self.cancel_canvas_pointer();
         self.waiting.retain(|(c, _)| c != id);
         let r = self.session.start_background(id, params);
         self.handle_ui_requests();
@@ -636,6 +649,7 @@ impl FigApp {
     /// Hand the results of background commands that finished to what's waiting for them.
     fn background_done(&mut self, ctx: &egui::Context) {
         while let Some((id, r)) = self.session.take_background_done() {
+            self.cancel_canvas_pointer();
             self.handle_ui_requests();
             let done = self.waiting.iter().position(|(c, _)| *c == id).map(|i| self.waiting.remove(i).1);
             match (r, done) {
@@ -659,6 +673,7 @@ impl FigApp {
         {
             return;
         }
+        self.cancel_canvas_pointer();
         let shown = self.session.execute("text.preview", &json!({"command": command, "params": params})).is_ok();
         let revision = self.session.ds().map_or(0, |d| d.revision);
         self.ui.text_preview = shown.then(|| (command.to_string(), params, revision));
@@ -669,6 +684,7 @@ impl FigApp {
     /// End the live text preview the panels show (Escape, or nothing hovered any more).
     pub fn end_text_preview(&mut self, ctx: &egui::Context) {
         if self.ui.text_preview.take().is_some() {
+            self.cancel_canvas_pointer();
             let _ = self.session.execute("text.endPreview", &json!({}));
             ctx.request_repaint();
         }
@@ -694,6 +710,9 @@ impl FigApp {
 
     /// Act on UI requests queued by commands (dialogs, panels).
     pub fn handle_ui_requests(&mut self) {
+        if !self.session.ui_requests.is_empty() {
+            self.cancel_canvas_pointer();
+        }
         let reqs = std::mem::take(&mut self.session.ui_requests);
         for r in reqs {
             match r.kind.as_str() {
@@ -970,6 +989,12 @@ impl FigApp {
 
     /// Per-frame logic that doesn't draw (control requests, theme, language).
     pub fn logic(&mut self, ctx: &egui::Context) {
+        self.canvas_pointer_preflight(ctx);
+        // Until ordered contact dispatch is installed, enrolled callers must
+        // interrupt before widgets, IME or panel fields can mutate Session.
+        if ctx.input(|input| input.events.iter().any(touch_events::external_edit_event)) {
+            self.cancel_canvas_pointer();
+        }
         self.platform_context = ctx.clone();
         self.poll_platform_requests(ctx);
         if self.language.as_ref() != Some(&self.session.prefs.language) {
@@ -1017,6 +1042,7 @@ impl FigApp {
             return;
         }
         if self.ui.next_autosave > 0.0 {
+            self.cancel_canvas_pointer();
             let active = self.session.active;
             for i in 0..self.session.docs.len() {
                 self.session.active = i;
@@ -1043,7 +1069,7 @@ impl FigApp {
             return;
         }
         // What happened in a live session (the network woke us for it).
-        if self.session.live_poll() {
+        if self.poll_live_with_pointer_barrier() {
             if let Some(m) = self.session.message.take() {
                 self.toast(m);
             }
@@ -1077,6 +1103,9 @@ impl FigApp {
         // focus on Escape before the frame, which cancels the field's edit and nothing else).
         let typing = std::mem::take(&mut self.field_focus) || a11y::field_focused(&ctx);
         // Control requests run first so their results reflect this frame.
+        if !self.control_queue.is_empty() {
+            self.cancel_canvas_pointer();
+        }
         control::drain(self, &ctx);
         windows::requests(self, &ctx);
         // Before any widget: the navigation keys (F6, Tab, arrows, Escape) move the keyboard.
@@ -1205,8 +1234,7 @@ impl FigApp {
         windows::requests(self, &ctx);
         // Your pointer, selection and view to the others in each live session (when they
         // changed), from the window with its file.
-        let windows = &self.windows;
-        self.session.live_sync_in(|uid| uid.map_or(0, |u| windows.of(u)) == windows.current);
+        self.sync_live_with_pointer_barrier();
     }
 
     fn toast_ui(&mut self, ctx: &egui::Context) {

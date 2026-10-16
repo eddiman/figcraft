@@ -39,6 +39,20 @@ pub struct CanvasState {
     pressure: Option<f32>,
 }
 
+impl CanvasState {
+    pub(crate) fn cancel_pointer(&mut self) {
+        self.dragging = false;
+        self.space_pan = false;
+        self.middle_pan = None;
+        self.zoom_tool = None;
+        self.zoom_drag = None;
+        self.last_pointer = None;
+        self.hovering = false;
+        self.cursor = None;
+        self.pressure = None;
+    }
+}
+
 impl Default for CanvasState {
     fn default() -> Self {
         Self {
@@ -149,15 +163,21 @@ fn pointer_event(app: &FigApp, kind: PointerKind, pos: Pos2, m: &egui::Modifiers
 
 pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
     let rect = ui.max_rect();
-    app.canvas.rect = rect;
     let ctx = ui.ctx().clone();
+    if app.canvas.rect != rect {
+        app.cancel_canvas_pointer();
+    }
+    app.canvas.rect = rect;
     let ppp = ctx.pixels_per_point();
     let resp = ui.interact(rect, ui.id().with("canvas"), Sense::click_and_drag());
     let key_box = app.ui.key_box;
     crate::a11y::canvas(&mut app.ui.nav, &resp, || key_box.map_or_else(|| describe(&app.session), describe_box));
-    if let Ok(ds) = app.session.ds_mut()
-        && ((ds.view.vw - f64::from(rect.width())).abs() > 0.5 || (ds.view.vh - f64::from(rect.height())).abs() > 0.5)
-    {
+    let resized =
+        app.session.ds().is_ok_and(|ds| (ds.view.vw - f64::from(rect.width())).abs() > 0.5 || (ds.view.vh - f64::from(rect.height())).abs() > 0.5);
+    if resized {
+        app.cancel_canvas_pointer();
+    }
+    if resized && let Ok(ds) = app.session.ds_mut() {
         // Keep the centre; the first sizing after opening re-fits.
         let first = ds.view.vw == 1200.0 && ds.view.vh == 800.0;
         ds.view.vw = f64::from(rect.width());
@@ -339,7 +359,7 @@ fn zoom_tool(app: &mut FigApp, ui: &Ui, resp: &egui::Response, pos: Pos2, mods: 
         let p = app.to_page(pos);
         json!({"x": p.x, "y": p.y, "out": mods.alt})
     };
-    app.run("view.zoomAt", params);
+    app.pointer_command("view.zoomAt", params);
     true
 }
 
@@ -347,6 +367,10 @@ fn zoom_tool(app: &mut FigApp, ui: &Ui, resp: &egui::Response, pos: Pos2, mods: 
 /// the pointer (a comment pin, a ruler guide, a gradient or padding handle): the tool's cursor
 /// then doesn't show.
 fn input(app: &mut FigApp, ui: &mut Ui, resp: &egui::Response) -> bool {
+    app.canvas_pointer_preflight(ui.ctx());
+    if app.canvas_input_blocked {
+        return true;
+    }
     if crate::proto_canvas::input(app, ui, resp) {
         return true;
     }
@@ -386,16 +410,20 @@ fn input(app: &mut FigApp, ui: &mut Ui, resp: &egui::Response) -> bool {
     if resp.hovered() {
         if (zoom_delta - 1.0).abs() > 1e-4 {
             let anchor = app.to_page(pos);
-            if let Ok(ds) = app.session.ds_mut() {
+            let _ = app.pointer_session(|session| {
+                let ds = session.ds_mut()?;
                 let z = ds.view.zoom * f64::from(zoom_delta);
                 ds.view.set_zoom_at(z, (anchor.x, anchor.y));
                 ds.revision += 1;
-            }
-        } else if scroll != egui::Vec2::ZERO
-            && let Ok(ds) = app.session.ds_mut()
-        {
-            ds.view.scroll(f64::from(scroll.x), f64::from(scroll.y), mods.shift);
-            ds.revision += 1;
+                Ok(())
+            });
+        } else if scroll != egui::Vec2::ZERO {
+            let _ = app.pointer_session(|session| {
+                let ds = session.ds_mut()?;
+                ds.view.scroll(f64::from(scroll.x), f64::from(scroll.y), mods.shift);
+                ds.revision += 1;
+                Ok(())
+            });
         }
     }
     if zoom_tool(app, ui, resp, pos, mods, editing_text || typing_elsewhere) {
@@ -404,16 +432,17 @@ fn input(app: &mut FigApp, ui: &mut Ui, resp: &egui::Response) -> bool {
     // Middle-button / space panning.
     let middle_down = ctx.input(|i| i.pointer.button_down(egui::PointerButton::Middle));
     if (middle_down || (app.canvas.space_pan && ctx.input(|i| i.pointer.primary_down()))) && resp.hovered() || app.canvas.middle_pan.is_some() {
-        if let Ok(ds) = app.session.ds_mut() {
-            match app.canvas.middle_pan {
-                None => app.canvas.middle_pan = Some((pos, ds.view.cx, ds.view.cy)),
-                Some((p0, cx, cy)) => {
-                    let z = ds.view.zoom.max(1e-6);
-                    ds.view.cx = cx - f64::from(pos.x - p0.x) / z;
-                    ds.view.cy = cy - f64::from(pos.y - p0.y) / z;
-                    ds.revision += 1;
-                }
-            }
+        if let Some((p0, cx, cy)) = app.canvas.middle_pan {
+            let _ = app.pointer_session(|session| {
+                let ds = session.ds_mut()?;
+                let z = ds.view.zoom.max(1e-6);
+                ds.view.cx = cx - f64::from(pos.x - p0.x) / z;
+                ds.view.cy = cy - f64::from(pos.y - p0.y) / z;
+                ds.revision += 1;
+                Ok(())
+            });
+        } else if let Ok(ds) = app.session.ds() {
+            app.canvas.middle_pan = Some((pos, ds.view.cx, ds.view.cy));
         }
         if !middle_down && !ctx.input(|i| i.pointer.primary_down()) {
             app.canvas.middle_pan = None;
@@ -435,7 +464,7 @@ fn input(app: &mut FigApp, ui: &mut Ui, resp: &egui::Response) -> bool {
     }
     if resp.double_clicked() {
         let ev = pointer_event(app, PointerKind::DoubleClick, pos, &mods);
-        if let Err(e) = app.session.pointer(&ev) {
+        if let Err(e) = app.pointer_session(|session| session.pointer(&ev)) {
             app.toast(e.to_string());
         }
         app.canvas.dragging = false;
@@ -487,7 +516,7 @@ fn input(app: &mut FigApp, ui: &mut Ui, resp: &egui::Response) -> bool {
             app.canvas.pressure = None;
         }
         app.canvas.last_pointer = Some(Point::new(ev.x, ev.y));
-        if let Err(e) = app.session.pointer(&ev) {
+        if let Err(e) = app.pointer_session(|session| session.pointer(&ev)) {
             app.toast(e.to_string());
         }
         app.handle_ui_requests();
@@ -498,6 +527,7 @@ fn input(app: &mut FigApp, ui: &mut Ui, resp: &egui::Response) -> bool {
 /// Right-click at screen `pos`: select what's under the pointer (`deep`: the nested layer), then
 /// open the context menu there.
 pub fn open_context_menu(app: &mut FigApp, pos: Pos2, deep: bool) {
+    app.cancel_canvas_pointer();
     let p = app.to_page(pos);
     if let Ok(ds) = app.session.ds() {
         let (doc, page, sel, zoom) = (ds.doc.clone(), ds.page, ds.selection.clone(), ds.view.zoom.max(1e-6));
@@ -1363,4 +1393,30 @@ fn rulers(app: &FigApp, painter: &egui::Painter, t: &Tokens, doc: &Document, sel
 pub fn fmt(v: f64) -> String {
     let r = (v * 100.0).round() / 100.0;
     if (r - r.round()).abs() < 1e-9 { format!("{}", r.round() as i64) } else { format!("{r}") }
+}
+
+#[cfg(test)]
+mod pointer_cancel_tests {
+    use super::*;
+    #[test]
+    fn ipad_ui_pointer_canvas_cleanup_removes_only_transient_owners() {
+        let mut state = CanvasState {
+            dragging: true,
+            space_pan: true,
+            middle_pan: Some((Pos2::ZERO, 10.0, 20.0)),
+            zoom_tool: Some(true),
+            zoom_drag: Some(Pos2::ZERO),
+            last_pointer: Some(Point::ZERO),
+            hovering: true,
+            pressure: Some(0.8),
+            rect: Rect::from_min_size(Pos2::ZERO, vec2(100.0, 200.0)),
+            ..Default::default()
+        };
+        let rect = state.rect;
+        state.cancel_pointer();
+        assert!(!state.dragging && !state.space_pan && !state.hovering);
+        assert!(state.middle_pan.is_none() && state.zoom_tool.is_none() && state.zoom_drag.is_none());
+        assert!(state.last_pointer.is_none() && state.pressure.is_none() && state.cursor.is_none());
+        assert_eq!(state.rect, rect);
+    }
 }

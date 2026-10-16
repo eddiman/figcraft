@@ -25,6 +25,7 @@ fn small_fixture() -> Result<Document, Box<dyn Error>> {
 
 struct Shell {
     field: String,
+    touch_observer: figcraft_ui_egui::touch_events::Normalizer,
     fit_requested: bool,
     smoke: bool,
     recovery: crate::recovery::Shared,
@@ -32,6 +33,16 @@ struct Shell {
 }
 
 impl eframe::App for Shell {
+    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
+        use figcraft_ui_egui::touch_events::{Owner, Routing};
+        // T34 observes the pinned producer before egui aggregates its events.
+        // T16 must install a complete consumer before any routing is enabled.
+        let frame = self.touch_observer.process(raw, Routing::Observe, |_| Owner::Suppressed);
+        for issue in frame.issues {
+            log::warn!("Unsupported native touch sequence: {issue:?}");
+        }
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         ui.painter().rect_filled(ui.max_rect(), 0.0, ui.visuals().panel_fill);
         ui.add_space(ui.input(|i| i.safe_area_insets().0.top).max(32.0));
@@ -112,7 +123,14 @@ pub fn run() -> Result<(), Box<dyn Error>> {
         Box::new(move |cc| {
             let lifecycle = figcraft_apple_ipad::LifecycleHost::new(crate::lifecycle::callback(recovery.clone(), cc.egui_ctx.clone()))
                 .map_err(std::io::Error::other)?;
-            Ok(Box::new(Shell { field: String::new(), fit_requested: false, smoke, recovery, _lifecycle: lifecycle }))
+            Ok(Box::new(Shell {
+                field: String::new(),
+                touch_observer: Default::default(),
+                fit_requested: false,
+                smoke,
+                recovery,
+                _lifecycle: lifecycle,
+            }))
         }),
     )?;
     Ok(())

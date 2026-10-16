@@ -49,6 +49,14 @@ struct Placed {
     line: Option<[Point; 2]>,
 }
 
+/// Remove both the drag and its proposed destination without running a command.
+pub(crate) fn cancel_pointer(ctx: &egui::Context) {
+    ctx.data_mut(|data| {
+        data.remove::<GuideDrag>(drag_id());
+        data.remove::<Placed>(preview_id());
+    });
+}
+
 fn drag_id() -> Id {
     Id::new("guide_drag")
 }
@@ -177,6 +185,7 @@ fn cursor_across(app: &FigApp, g: &Placed, r: Rect) -> egui::CursorIcon {
 
 /// Pointer handling; returns true when the event belongs to a ruler or guide.
 pub fn input(app: &mut FigApp, ctx: &egui::Context, pos: Pos2) -> bool {
+    app.canvas_pointer_preflight(ctx);
     if !rulers_on(app) {
         return false;
     }
@@ -226,14 +235,14 @@ pub fn input(app: &mut FigApp, ctx: &egui::Context, pos: Pos2) -> bool {
             });
             match (drag, on_ruler, at) {
                 (GuideDrag::New { .. } | GuideDrag::Move { copy: true, .. }, false, Some(g)) if Some(g.offset) != before => {
-                    app.run("guide.add", owned(g.owner, page, json!({"vertical": g.vertical, "offset": g.offset})));
+                    app.pointer_command("guide.add", owned(g.owner, page, json!({"vertical": g.vertical, "offset": g.offset})));
                 }
                 (GuideDrag::Move { owner, index, copy: false, .. }, true, _) => {
-                    app.run("guide.remove", owned(owner, page, json!({"index": index})));
+                    app.pointer_command("guide.remove", owned(owner, page, json!({"index": index})));
                 }
                 // A click without a move leaves it where it is (selected).
                 (GuideDrag::Move { owner, index, copy: false, .. }, false, Some(g)) if Some(g.offset) != before => {
-                    app.run("guide.move", owned(owner, page, json!({"index": index, "offset": g.offset})));
+                    app.pointer_command("guide.move", owned(owner, page, json!({"index": index, "offset": g.offset})));
                 }
                 _ => {}
             }
@@ -265,7 +274,7 @@ pub fn input(app: &mut FigApp, ctx: &egui::Context, pos: Pos2) -> bool {
         if pressed || secondary {
             // The frame selected before the click is the one Alt measures in.
             let frame = selected_frame(app).or((Some(g.owner) != page).then_some(g.owner));
-            app.run("guide.select", owned(g.owner, page, json!({"index": g.index})));
+            app.pointer_command("guide.select", owned(g.owner, page, json!({"index": g.index})));
             if secondary {
                 app.ui.context_menu = Some((pos, Vec::new()));
             } else {
@@ -320,4 +329,25 @@ fn label(app: &FigApp, painter: &egui::Painter, r: Rect, g: &Placed) {
     let tag = Rect::from_min_size(at, size);
     painter.rect_filled(tag, CornerRadius::same(3), GUIDE);
     painter.galley(tag.min + vec2(4.0, 2.0), galley, Color32::WHITE);
+}
+
+#[cfg(test)]
+mod pointer_cancel_tests {
+    use super::*;
+    use crate::canvas_pointer::tests::{cancel_and_release, preview_fixture};
+    #[test]
+    fn ipad_ui_pointer_guide_owner_and_preview_cannot_commit_after_reset_up() {
+        let (mut a, ctx, _) = preview_fixture();
+        a.session.ds_mut().unwrap().view.rulers = true;
+        let page = a.session.ds().unwrap().page;
+        ctx.data_mut(|data| {
+            data.insert_temp(drag_id(), GuideDrag::New { vertical: true, frame: None });
+            data.insert_temp(preview_id(), Placed { owner: page, index: 0, vertical: true, offset: 120.0, line: None });
+        });
+        cancel_and_release(a, ctx, |a, ui| {
+            assert!(ui.ctx().data(|data| data.get_temp::<GuideDrag>(drag_id())).is_none());
+            assert!(ui.ctx().data(|data| data.get_temp::<Placed>(preview_id())).is_none());
+            input(a, ui.ctx(), pos2(400.0, 300.0));
+        });
+    }
 }

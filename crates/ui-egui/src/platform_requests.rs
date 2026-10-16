@@ -239,6 +239,7 @@ impl FigApp {
         operation: Operation,
         done: PlatformDone,
     ) -> Result<RequestId, RejectReason> {
+        self.cancel_canvas_pointer();
         self.cancel_closed_platform_requests();
         let expected = match &operation {
             Operation::OpenCopy(_) => Expected::Selected,
@@ -333,6 +334,7 @@ impl FigApp {
             self.platform_rejected(&RejectReason::InvalidRequest("completion payload does not match operation".into()));
             return;
         }
+        self.cancel_canvas_pointer();
         let previous = self.session.ds().ok().map(|d| d.uid);
         if let Some(document) = pending.document {
             let Some(index) = self.session.docs.iter().position(|d| d.uid == document.uid) else { return };
@@ -350,6 +352,7 @@ impl FigApp {
 
 impl Drop for FigApp {
     fn drop(&mut self) {
+        self.cancel_canvas_pointer();
         self.cancel_platform_requests();
     }
 }

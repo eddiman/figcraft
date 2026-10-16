@@ -715,3 +715,45 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
     ]
 }
+
+#[cfg(test)]
+mod pointer_barrier_tests {
+    use super::*;
+    #[test]
+    fn ipad_sync_recovery_cancels_before_opening_the_independent_copy() {
+        let mut session = Session::new();
+        let uid = session.ds().unwrap().uid;
+        let before = session.ds().unwrap().doc.clone();
+        let copy = Session::new().docs.remove(0);
+        session.live.recovering.push(Recovering { session: u64::MAX, copy: Box::new(copy), at: Resume { session: 1, client_id: 1, seq: 0 } });
+        let token = session.begin_pointer_gesture().unwrap();
+        session
+            .with_pointer_gesture(&token, |s| {
+                s.begin_interaction("Preview")?;
+                s.execute("shape.rectangle", &json!({"x":1,"y":2,"width":3,"height":4}))?;
+                Ok(())
+            })
+            .unwrap();
+        let mut called = false;
+        session.live_sync_in_with_barrier(
+            |_| true,
+            |s| {
+                assert_eq!(s.ds().unwrap().uid, uid);
+                assert_eq!(s.docs.len(), 1);
+                s.cancel_pointer_gesture(&token).unwrap();
+                called = true;
+            },
+        );
+        assert!(called);
+        assert_eq!(session.docs.len(), 2);
+        assert_ne!(session.ds().unwrap().uid, uid);
+        assert!(std::sync::Arc::ptr_eq(&before, &session.docs.iter().find(|d| d.uid == uid).unwrap().doc));
+    }
+    #[test]
+    fn ipad_sync_without_deferred_work_does_not_call_the_barrier() {
+        let mut session = Session::new();
+        let mut called = false;
+        session.live_sync_in_with_barrier(|_| true, |_| called = true);
+        assert!(!called);
+    }
+}

@@ -65,7 +65,41 @@ impl Default for CommentUi {
     }
 }
 
+/// Canvas-owned changes to the comment popover. Panel filter/search state is
+/// deliberately outside this checkpoint.
+pub(crate) struct PointerUi {
+    open: Option<u64>,
+    draft: Option<(f64, f64, String)>,
+    reply: String,
+    editing: Option<(u64, usize, String)>,
+    mention: MentionPick,
+    scroll_to_open: bool,
+}
+
 impl CommentUi {
+    pub(crate) fn pointer_ui(&self) -> PointerUi {
+        PointerUi {
+            open: self.open,
+            draft: self.draft.clone(),
+            reply: self.reply.clone(),
+            editing: self.editing.clone(),
+            mention: self.mention.clone(),
+            scroll_to_open: self.scroll_to_open,
+        }
+    }
+    pub(crate) fn restore_pointer_ui(&mut self, saved: PointerUi) {
+        self.open = saved.open;
+        self.draft = saved.draft;
+        self.reply = saved.reply;
+        self.editing = saved.editing;
+        self.mention = saved.mention;
+        self.scroll_to_open = saved.scroll_to_open;
+        self.drag = None;
+    }
+    pub(crate) fn cancel_pointer(&mut self) {
+        self.drag = None;
+    }
+
     /// A pin is being pressed or dragged.
     pub fn dragging(&self) -> bool {
         self.drag.is_some()
@@ -417,6 +451,7 @@ fn toggle(app: &mut FigApp, id: u64) {
 /// under it), a cluster click zooms in until its pins come apart. Returns true when the comments
 /// own the pointer.
 pub fn input(app: &mut FigApp, ctx: &egui::Context, pos: Pos2) -> bool {
+    app.canvas_pointer_preflight(ctx);
     if !visible(app) {
         app.ui.comments.drag = None;
         return false;
@@ -432,7 +467,7 @@ pub fn input(app: &mut FigApp, ctx: &egui::Context, pos: Pos2) -> bool {
             app.ui.comments.drag = Some(d);
         } else if d.moved {
             let p = app.to_page(d.at);
-            app.run("comment.move", json!({"id": d.id, "x": p.x, "y": p.y}));
+            app.pointer_command("comment.move", json!({"id": d.id, "x": p.x, "y": p.y}));
         } else {
             toggle(app, d.id);
         }
@@ -450,7 +485,7 @@ pub fn input(app: &mut FigApp, ctx: &egui::Context, pos: Pos2) -> bool {
             Spot::Many(ids, at) if cluster_rect(*at, ids.len()).contains(pos) => {
                 ctx.set_cursor_icon(egui::CursorIcon::ZoomIn);
                 if pressed {
-                    app.run("comment.zoom", json!({"ids": ids}));
+                    app.pointer_command("comment.zoom", json!({"ids": ids}));
                 }
                 return true;
             }
@@ -974,6 +1009,7 @@ fn panel_params(cu: &CommentUi, dir: i32) -> Value {
 /// put the keyboard in its reply field (where the arrows go on stepping while it's empty).
 pub fn step(app: &mut FigApp, ctx: &egui::Context, dir: i32) -> Option<Value> {
     let p = panel_params(&app.ui.comments, dir);
+    app.cancel_canvas_pointer();
     let r = app.session.execute("comment.next", &p).ok();
     app.handle_ui_requests();
     if r.is_some()
@@ -1192,5 +1228,27 @@ pub fn presenter(app: &mut FigApp, ctx: &egui::Context, frame: NodeId, place: cr
         Some(p) => thread(app, ctx, p.id, p.at, ctx.content_rect()),
         // A thread on another frame (or none) closes.
         None => app.ui.comments.close(),
+    }
+}
+
+#[cfg(test)]
+mod pointer_cancel_tests {
+    use super::*;
+    use crate::canvas_pointer::tests::{cancel_and_release, preview_fixture};
+    #[test]
+    fn ipad_ui_pointer_comment_pin_cannot_move_or_toggle_after_reset_up() {
+        for moved in [false, true] {
+            let (mut a, ctx, _) = preview_fixture();
+            a.session.tool.tool = ToolId::Comment;
+            a.ui.comments.open = Some(17);
+            a.ui.comments.reply = "Retain this draft".into();
+            a.ui.comments.drag = Some(PinDrag { id: 17, from: Pos2::ZERO, grab: Vec2::ZERO, at: pos2(400.0, 300.0), mine: true, moved });
+            let a = cancel_and_release(a, ctx, |a, ui| {
+                assert!(!a.ui.comments.dragging());
+                input(a, ui.ctx(), pos2(400.0, 300.0));
+            });
+            assert_eq!(a.ui.comments.open, Some(17));
+            assert_eq!(a.ui.comments.reply, "Retain this draft");
+        }
     }
 }

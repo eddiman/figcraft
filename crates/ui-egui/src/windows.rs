@@ -156,12 +156,16 @@ fn show_own(app: &mut FigApp, want: Option<u64>) {
         .or_else(|| app.session.ds().ok().filter(|d| mine(d)).map(|_| app.session.active))
         .or_else(|| app.session.docs.iter().position(mine));
     if let Some(i) = pick {
+        if app.session.active != i {
+            app.cancel_canvas_pointer();
+        }
         app.session.active = i;
     }
 }
 
 /// Swap a window's UI state with the app's; what the app shares between windows stays.
 fn exchange(app: &mut FigApp, p: &mut Pane) {
+    app.cancel_canvas_pointer();
     std::mem::swap(&mut app.ui, &mut p.ui);
     std::mem::swap(&mut app.ui.last_copy, &mut p.ui.last_copy);
     std::mem::swap(&mut app.ui.quit, &mut p.ui.quit);
@@ -361,6 +365,7 @@ pub(crate) fn begin(app: &mut FigApp, ctx: &Context) {
         let files: Vec<u64> = app.session.docs.iter().filter(|d| app.windows.of(d.uid) == id).map(|d| d.uid).collect();
         for uid in files {
             if let Some(i) = app.session.docs.iter().position(|d| d.uid == uid) {
+                app.cancel_canvas_pointer();
                 let _ = app.session.execute("file.close", &json!({"index": i, "force": true}));
             }
         }

@@ -21,6 +21,11 @@ struct Drag {
     pos: Pos2,
 }
 
+/// Remove the owner before a reset/release can reach the commit branch.
+pub(crate) fn cancel_pointer(ctx: &egui::Context) {
+    ctx.data_mut(|data| data.remove::<Drag>(drag_id()));
+}
+
 fn drag_id() -> Id {
     Id::new("proto_canvas_drag")
 }
@@ -212,6 +217,7 @@ pub fn draw(app: &FigApp, painter: &egui::Painter) {
 /// (dragging from a connection handle, or clicking a noodle).
 pub fn input(app: &mut FigApp, ui: &egui::Ui, resp: &egui::Response) -> bool {
     let ctx = ui.ctx().clone();
+    app.canvas_pointer_preflight(&ctx);
     let drag: Option<Drag> = ctx.data(|d| d.get_temp(drag_id()));
     if !active(app) {
         if drag.is_some() {
@@ -238,7 +244,7 @@ pub fn input(app: &mut FigApp, ui: &egui::Ui, resp: &egui::Response) -> bool {
             ctx.data_mut(|m| m.remove::<Drag>(drag_id()));
             if let Some(dest) = frame_at(app, &doc, page, d.pos)
                 && doc.top_level_frame(d.source) != Some(dest)
-                && let Some(r) = app.run("proto.interaction.add", json!({"ids": [d.source], "dest": dest}))
+                && let Some(r) = app.pointer_command("proto.interaction.add", json!({"ids": [d.source], "dest": dest}))
             {
                 let k = r.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
                 crate::proto_panel::open_editor(&ctx, Some((d.source, k)));
@@ -268,7 +274,10 @@ pub fn input(app: &mut FigApp, ui: &egui::Ui, resp: &egui::Response) -> bool {
         .filter(|n| bezier_distance(&n.pts, pos) < 5.0)
         .min_by(|a, b| bezier_distance(&a.pts, pos).total_cmp(&bezier_distance(&b.pts, pos)));
     if let Some(n) = hit {
-        app.session.set_selection(vec![n.source]);
+        let _ = app.pointer_session(|session| {
+            session.set_selection(vec![n.source]);
+            Ok(())
+        });
         crate::proto_panel::open_editor(&ctx, Some((n.source, n.index)));
         return true;
     }
@@ -291,5 +300,22 @@ mod tests {
         assert_eq!(back[3], pos2(50.0, 10.0));
         assert!(bezier_distance(&c, bezier(&c, 0.5)) < 0.5);
         assert!(bezier_distance(&c, pos2(0.0, 300.0)) > 50.0);
+    }
+}
+
+#[cfg(test)]
+mod pointer_cancel_tests {
+    use super::*;
+    use crate::canvas_pointer::tests::{cancel_and_release, preview_fixture};
+    #[test]
+    fn ipad_ui_pointer_prototype_owner_cannot_add_connection_after_reset_up() {
+        let (mut a, ctx, id) = preview_fixture();
+        a.ui.right_tab = RightTab::Prototype;
+        ctx.data_mut(|data| data.insert_temp(drag_id(), Drag { source: id, from: Pos2::ZERO, pos: pos2(400.0, 300.0) }));
+        cancel_and_release(a, ctx, |a, ui| {
+            assert!(ui.ctx().data(|data| data.get_temp::<Drag>(drag_id())).is_none());
+            let resp = ui.interact(a.canvas.rect, ui.id().with("canvas"), egui::Sense::click_and_drag());
+            input(a, ui, &resp);
+        });
     }
 }

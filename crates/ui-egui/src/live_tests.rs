@@ -351,3 +351,23 @@ fn share_popover_and_join_dialog() {
     h.frames(1);
     assert!(h.app.ui.live.join.is_none());
 }
+
+#[test]
+fn ipad_ui_pointer_nonempty_live_poll_cancels_before_incoming_application() {
+    let (mut h, _) = Harness::new();
+    h.joined();
+    h.app.run("file.new", json!({})).unwrap();
+    let before = h.app.session.ds().unwrap().doc.clone();
+    h.app.begin_canvas_pointer(&h.ctx).unwrap();
+    h.app
+        .pointer_session(|session| {
+            session.begin_interaction("Local preview")?;
+            session.execute("shape.rectangle", &json!({"x": 1, "y": 2, "width": 3, "height": 4}))?;
+            Ok(())
+        })
+        .unwrap();
+    assert!(h.app.poll_live_with_pointer_barrier());
+    assert!(h.app.canvas_pointer.is_none());
+    assert!(Arc::ptr_eq(&before, &h.app.session.ds().unwrap().doc));
+    assert!(!h.app.poll_live_with_pointer_barrier());
+}

@@ -104,6 +104,9 @@ pub fn handle(app: &mut FigApp, ctx: &Context, typing: bool) {
     if events.is_empty() {
         return;
     }
+    if events.iter().any(|event| matches!(event, Event::Text(_) | Event::Ime(_) | Event::Key { .. } | Event::Paste(_) | Event::Copy | Event::Cut)) {
+        app.cancel_canvas_pointer();
+    }
     let editing = app.session.ds().map(|d| d.text_edit.is_some()).unwrap_or(false);
     if editing {
         text_keys(app, ctx, &events);
@@ -117,16 +120,55 @@ pub fn handle(app: &mut FigApp, ctx: &Context, typing: bool) {
     }
     let now = ctx.input(|i| i.time);
     for ev in &events {
-        match ev {
-            Event::Copy => crate::menus::invoke(app, "edit.copy"),
-            Event::Cut => crate::menus::invoke(app, "edit.cut"),
-            Event::Paste(text) => crate::menus::paste(app, Some(text)),
-            Event::Key { key, physical_key, pressed: true, modifiers, repeat }
-                if key_event(app, *key, *physical_key, *modifiers, *repeat, now, ctx) =>
-            {
-                // handled
+        canvas_event(app, ctx, ev, now);
+    }
+}
+
+fn canvas_event(app: &mut FigApp, ctx: &Context, ev: &Event, now: f64) {
+    match ev {
+        Event::Copy => crate::menus::invoke(app, "edit.copy"),
+        Event::Cut => crate::menus::invoke(app, "edit.cut"),
+        Event::Paste(text) => crate::menus::paste(app, Some(text)),
+        Event::Key { key, physical_key, pressed: true, modifiers, repeat } if key_event(app, *key, *physical_key, *modifiers, *repeat, now, ctx) => {
+            // handled
+        }
+        _ => {}
+    }
+}
+
+/// One raw batch's keyboard state for an explicitly enrolled ordered consumer.
+/// Values do not retain any text or IME event across callbacks or frames.
+pub(crate) struct KeyboardFrame {
+    skip_text: bool,
+    has_paste: bool,
+    fallback_used: bool,
+    edited_text: bool,
+}
+impl KeyboardFrame {
+    pub(crate) fn new(events: &[Event]) -> Self {
+        Self { skip_text: false, has_paste: events.iter().any(|e| matches!(e, Event::Paste(_))), fallback_used: false, edited_text: false }
+    }
+    pub(crate) fn event(&mut self, app: &mut FigApp, ctx: &Context, event: &Event, now: f64) {
+        app.cancel_canvas_pointer();
+        if app.session.ds().is_ok_and(|d| d.text_edit.is_some()) {
+            self.edited_text = true;
+            text_key_events(app, std::slice::from_ref(event), &mut self.skip_text);
+        } else {
+            let paste_key = matches!(event, Event::Key { key: Key::V, pressed: true, repeat: false, modifiers, .. } if modifiers.command && !modifiers.shift && !modifiers.alt);
+            if paste_key && !self.has_paste && !self.fallback_used {
+                self.fallback_used = true;
+                crate::menus::paste(app, None);
             }
-            _ => {}
+            canvas_event(app, ctx, event, now);
+        }
+    }
+    pub(crate) fn finish(self, app: &mut FigApp, ctx: &Context) {
+        if self.edited_text {
+            // raw_input_hook still sees the preceding pass's pointer clicks.
+            // Only text presentation can run here; the ordinary frame handles
+            // current mouse clicks through the unchanged legacy route.
+            app.sync_preedit();
+            ime_output(app, ctx);
         }
     }
 }
@@ -134,6 +176,7 @@ pub fn handle(app: &mut FigApp, ctx: &Context, typing: bool) {
 /// Run the command a shortcut is bound to, with the keyboard's own twists (Escape steps out
 /// before it deselects, Delete ends a pen path, Enter edits the selected text or vector).
 pub fn run_binding(app: &mut FigApp, id: &str) {
+    app.cancel_canvas_pointer();
     match id {
         "select.none" => {
             if let Err(e) = app.session.escape() {
@@ -333,13 +376,17 @@ fn enter_text(app: &mut FigApp) -> bool {
 }
 
 fn text_keys(app: &mut FigApp, ctx: &Context, events: &[Event]) {
-    // A key that ran a shortcut swallows the text it also produced (Alt+. types "≥" on macOS).
     let mut skip_text = false;
+    text_key_events(app, events, &mut skip_text);
+    finish_text_keys(app, ctx);
+}
+
+fn text_key_events(app: &mut FigApp, events: &[Event], skip_text: &mut bool) {
     for ev in events {
         match ev {
             Event::Text(t) | Event::Ime(egui::ImeEvent::Commit(t)) => {
-                if skip_text && matches!(ev, Event::Text(_)) {
-                    skip_text = false;
+                if *skip_text && matches!(ev, Event::Text(_)) {
+                    *skip_text = false;
                     continue;
                 }
                 if let Err(e) = figcraft_engine::textedit::insert(&mut app.session, t) {
@@ -369,7 +416,7 @@ fn text_keys(app: &mut FigApp, ctx: &Context, events: &[Event]) {
             }
             Event::Key { key, physical_key, pressed: true, modifiers: m, .. } => {
                 if (m.command || m.alt || m.ctrl) && text_shortcut(app, *key, *physical_key, *m) {
-                    skip_text = true;
+                    *skip_text = true;
                     continue;
                 }
                 let name = match key {
@@ -404,6 +451,9 @@ fn text_keys(app: &mut FigApp, ctx: &Context, events: &[Event]) {
             _ => {}
         }
     }
+}
+
+fn finish_text_keys(app: &mut FigApp, ctx: &Context) {
     // Triple-click on the edited text selects its line (double-click is handled by the engine).
     if ctx.input(|i| i.pointer.button_triple_clicked(egui::PointerButton::Primary))
         && let Some(pos) = ctx.input(|i| i.pointer.interact_pos())

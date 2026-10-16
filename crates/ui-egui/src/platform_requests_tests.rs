@@ -652,3 +652,67 @@ fn ipad_failed_import_restores_selection_changed_while_waiting() {
     assert_eq!(*app.session.doc().unwrap(), original);
     assert!(app.ui.last_error.is_some());
 }
+
+#[test]
+fn ipad_ui_pointer_delayed_platform_completion_restores_before_callback() {
+    let (mut app, state, ctx) = setup();
+    let baseline_count = app.session.doc().unwrap().nodes().count();
+    let id = app
+        .submit_platform_request(
+            &ctx,
+            Some(target(&app)),
+            Operation::ImportCopy(spec()),
+            Box::new(move |app, _| {
+                assert!(app.canvas_pointer.is_none());
+                let count = app.session.doc().unwrap().nodes().count();
+                // The preview was removed before this direct callback mutation.
+                assert_eq!(count, baseline_count);
+                app.session.execute("shape.rectangle", &json!({"x": 500, "y": 2, "width": 3, "height": 4})).unwrap();
+            }),
+        )
+        .unwrap();
+    app.begin_canvas_pointer(&ctx).unwrap();
+    app.pointer_session(|session| {
+        session.begin_interaction("Local preview")?;
+        session.execute("shape.rectangle", &json!({"x": 1, "y": 2, "width": 3, "height": 4}))?;
+        Ok(())
+    })
+    .unwrap();
+    complete(&state, id, selected());
+    app.poll_platform_requests(&ctx);
+    assert!(app.canvas_pointer.is_none());
+    assert_eq!(app.session.doc().unwrap().nodes().count(), baseline_count + 1);
+}
+
+#[test]
+fn ipad_ui_pointer_delayed_completion_inserts_after_the_restored_text_caret() {
+    use figcraft_doc::{NodeId, NodeKind};
+    use figcraft_engine::textedit;
+    let (mut app, state, ctx) = setup();
+    ctx.run_ui(egui::RawInput::default(), |_| {}).drop_without_applying_deltas();
+    let text = NodeId(app.run("text.create", json!({"text":"Before","x":20,"y":20})).unwrap()["id"].as_u64().unwrap());
+    textedit::begin(&mut app.session, text, Some(6), false).unwrap();
+    textedit::insert(&mut app.session, "A").unwrap();
+    let id = app
+        .submit_platform_request(
+            &ctx,
+            Some(target(&app)),
+            Operation::ImportCopy(spec()),
+            Box::new(|app, _| {
+                assert!(app.canvas_pointer.is_none());
+                assert_eq!(app.session.ds().unwrap().text_edit.as_ref().unwrap().caret, 7);
+                textedit::insert(&mut app.session, "B").unwrap();
+            }),
+        )
+        .unwrap();
+    app.begin_canvas_pointer(&ctx).unwrap();
+    app.pointer_session(|s| textedit::set_caret(s, 0, false)).unwrap();
+    complete(&state, id, selected());
+    app.poll_platform_requests(&ctx);
+    let NodeKind::Text(t) = &app.session.doc().unwrap().node(text).unwrap().kind else {
+        panic!("text");
+    };
+    assert_eq!(t.characters, "BeforeAB");
+    assert!(app.session.ds().unwrap().text_edit.is_some());
+    assert_eq!(app.finish_canvas_pointer().unwrap(), figcraft_engine::PointerGestureEnd::Inactive);
+}

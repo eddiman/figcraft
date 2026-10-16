@@ -69,3 +69,52 @@ Pointer-generated command journal entries and UI requests remain in bounded chec
 Existing desktop/web pointer routes remain unenrolled. T34 still needs the ordered raw-event and UI drag-owner barriers before T16 activates native touch editing. Low-level public DocState mutation remains a caller responsibility. Attached live sessions, including a host that has no synchronized document ID yet and branches of that file, are refused until T28 reviews collaboration-aware cancellation. No native interop, dependency or file-schema change is introduced. Validation and limits are recorded in the external T15 result.
 
 Final T15 validation passed cargo xtask ci with 2,301 tests passed, zero failed and eight ignored. The engine passed 932 tests with three ignored, the shared UI passed 371 with one ignored, and the desktop passed all 29. Forty-two new cancellation regressions plus one generation-exhaustion test cover the API. Both iOS compile checks for figcraft-ipad passed. The late-finish regression failed before the active-source guard and passes after it. The final full run includes cancellation without an active tab; the earlier 2,299-test CI run predates those final ownership cases. Native touch, UI drag cleanup and physical input qualification remain future work.
+
+
+## 2026-10-16: T34 ordered input and UI cancellation
+
+The native raw_input_hook observes the pinned egui-winit event producer before
+egui aggregates pointer state. Observation preserves the original pointer route.
+The opt-in normalizer recognizes only contiguous synthesized touch suffixes,
+retains independent mouse/panel events and records contact identity, ordinal and
+frame-clock provenance. Force does not identify Pencil. Unsupported sequences
+cancel and suppress ownership; capacity recovery requires focus reset. Backend
+primary/cursor state survives focus loss so a late End is decoded correctly.
+
+An explicit-consumer boundary dispatches canvas contact/text/contact in raw
+order, using the existing shortcut/IME interpretation once. Its keyboard state
+retains Alt-shortcut text suppression and paste lookahead within one batch.
+Panel field text stays with egui. A forwarded panel or mouse event cancels the
+canvas operation before egui can mutate focus/layout, then suppresses subsequent
+canvas contacts in that batch. Value tracking is bounded and retains no text.
+The native app does not install a consumer until T16 provides its full recognizer.
+
+FigApp cancels UI owners before restoring its T15 checkpoint. Gradient/crop/blur/
+padding/gap handles, guides and preview, comment pins and prototype connectors
+cannot commit from a later reset release. Comment popover and prototype editor
+state are restored on a normal cancellation of their source. Commands, text/IME,
+platform/background completions, control, due autosave, layout/source changes and
+lifecycle requests have barriers. A checked host interruption generation also
+invalidates pending contacts that have no engine checkpoint yet. A nonempty live
+poll invokes UI cancellation before applying its events; empty polls leave local
+ownership alone. Attached live documents remain refused until T28.
+
+Validation and simulator evidence are recorded in the external T34 result. The
+native app still uses its existing pointer route. No Pencil identity, device touch
+or collaboration qualification is claimed, and physical checks remain deferred.
+
+
+The final ingress audit also guards frame-end live synchronization when deferred
+work or recovery can settle. The recovery test confirms cancellation precedes
+opening an independent recovered copy; idle sync preserves local ownership. The
+legacy engine sync wrapper keeps its original application path. Final validation
+and the local source commit are recorded in the T34 result.
+
+
+Final T34 validation passed cargo xtask ci: 2,364 passed, zero failed and eight
+ignored. The engine passed 934 tests (three ignored), UI 432 (one ignored) and
+desktop 29. Sixty-one UI cases and two engine cases are new relative to T15.
+Both iOS target checks and the simulator link passed. The iPad Air 11 M3 simulator
+rendered the synthetic document; tapping the smoke field and typing T34 showed
+exactly three characters. The captured runtime log had no unsupported-touch
+warning or panic. This is simulator evidence; physical input remains deferred.
