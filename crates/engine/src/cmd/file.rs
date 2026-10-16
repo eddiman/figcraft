@@ -610,7 +610,7 @@ pub(crate) fn variables_param(cmd: &str, p: &Value) -> Result<Option<Value>> {
 pub const MAX_RECENT: usize = 20;
 
 /// Put `path` at the top of the recent files.
-fn remember(s: &mut Session, path: &str) {
+pub(crate) fn remember(s: &mut Session, path: &str) {
     let r = &mut s.prefs.recent_files;
     r.retain(|p| p != path);
     r.insert(0, path.to_string());
@@ -713,18 +713,12 @@ fn color_profile(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// Save the file of the active tab (the main file for a branch tab, with its branches).
 fn save_to(s: &mut Session, path: String) -> Result<Value> {
-    let i = crate::branches::file_tab(s);
-    let ds = s.docs.get_mut(i).ok_or(EngineError::NoDocument)?;
-    let bytes = file_bytes(ds)?;
+    use crate::persistence::{SaveAssurance, SaveDestination, acknowledge_save, encode_save, prepare_save};
+    let uid = s.ds()?.uid;
+    let prepared = prepare_save(s, uid)?;
+    let bytes = encode_save(&prepared)?;
     write(&path, &bytes)?;
-    ds.path = Some(path.clone());
-    ds.mark_saved();
-    ds.revision += 1;
-    let uid = ds.uid;
-    for tab in s.docs.iter_mut().filter(|d| d.branch_of.as_ref().is_some_and(|(m, _)| *m == uid)) {
-        tab.mark_saved();
-    }
-    remember(s, &path);
+    acknowledge_save(s, &prepared, SaveDestination::SaveAs(path.clone()), SaveAssurance::AtomicReplacement)?;
     Ok(json!({"path": path, "bytes": bytes.len()}))
 }
 

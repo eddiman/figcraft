@@ -19,7 +19,9 @@
 
 pub mod fig;
 pub mod library;
+mod persistence;
 pub mod rest;
+pub use persistence::ArchiveContent;
 pub mod thumbnail;
 
 pub use library::{is_valid_library_id, read_library, read_library_within};
@@ -31,7 +33,9 @@ use std::sync::Arc;
 use figcraft_doc::{Document, ImageData};
 use serde::de::{Deserializer, IgnoredAny, MapAccess, Visitor};
 use serde::{Deserialize, Serialize, Serializer};
-use serde_json::{Value, json};
+use serde_json::Value;
+#[cfg(test)]
+use serde_json::json;
 use sha2::Digest;
 
 pub const EXTENSION: &str = "figcraft";
@@ -119,6 +123,22 @@ impl Version {
                 doc.images = images.clone();
                 Ok(Arc::new(doc))
             }
+        }
+    }
+
+    /// Sufficient immutable storage identity, without parsing lazy snapshots.
+    /// Metadata is compared separately by the engine's retained file baseline.
+    pub fn same_snapshot_storage(&self, other: &Self) -> bool {
+        match (&self.snapshot, &other.snapshot) {
+            (Snapshot::Doc(a), Snapshot::Doc(b)) => Arc::ptr_eq(a, b),
+            (Snapshot::Stored { json: a, images: ai }, Snapshot::Stored { json: b, images: bi }) => {
+                Arc::ptr_eq(a, b)
+                    && ai.len() == bi.len()
+                    && ai
+                        .iter()
+                        .all(|(key, a)| bi.get(key).is_some_and(|b| a.width == b.width && a.height == b.height && Arc::ptr_eq(&a.bytes, &b.bytes)))
+            }
+            _ => false,
         }
     }
 
@@ -332,15 +352,6 @@ pub(crate) fn put<W: Write + Seek>(
     z.write_all(bytes).map_err(io_err)
 }
 
-/// Add `doc` as a `document.json`-style member, serialized straight into the compressor.
-fn put_json<W: Write + Seek>(z: &mut zip::ZipWriter<W>, name: &str, doc: &Document) -> Result<(), FormatError> {
-    z.start_file(name, json_options()).map_err(io_err)?;
-    // The serializer writes many small pieces: batch them before they reach the compressor.
-    let mut w = std::io::BufWriter::with_capacity(1 << 16, z);
-    write_json(doc, &mut w)?;
-    w.flush().map_err(io_err)
-}
-
 /// How JSON members are compressed. Document JSON is very repetitive: a fast level compresses it
 /// nearly as well as the default one (about 15% larger) in half the time.
 pub(crate) fn json_options() -> zip::write::SimpleFileOptions {
@@ -364,73 +375,7 @@ pub fn save_bytes_with_history(
     versions: &[Version],
     branches: &[Branch],
 ) -> Result<Vec<u8>, FormatError> {
-    let mut buf = std::io::Cursor::new(Vec::new());
-    {
-        let mut z = zip::ZipWriter::new(&mut buf);
-        let stored = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
-        put_json(&mut z, "document.json", doc)?;
-        // Every image once, whether the document, a version or a branch uses it.
-        let mut written = BTreeSet::new();
-        let branch_images = branches.iter().flat_map(|b| [&b.base.images, &b.head.images].into_iter().chain(b.versions.iter().map(Version::images)));
-        for (hash, img) in std::iter::once(&doc.images).chain(versions.iter().map(Version::images)).chain(branch_images).flatten() {
-            if written.insert(hash) {
-                put(&mut z, &format!("images/{hash}"), stored, &img.bytes)?;
-            }
-        }
-        if let Some(t) = thumbnail_png {
-            put(&mut z, "thumbnail.png", stored, t)?;
-        }
-        put_versions(&mut z, "versions", versions)?;
-        if !branches.is_empty() {
-            let mut ids = BTreeSet::new();
-            let mut index = Vec::with_capacity(branches.len());
-            for b in branches {
-                if !is_valid_version_id(&b.id) || !ids.insert(b.id.as_str()) {
-                    return Err(FormatError::Io(format!("invalid or duplicate branch id `{}`", b.id)));
-                }
-                put_json(&mut z, &format!("branches/{}/base.json", b.id), &b.base)?;
-                put_json(&mut z, &format!("branches/{}/head.json", b.id), &b.head)?;
-                put_versions(&mut z, &format!("branches/{}/versions", b.id), &b.versions)?;
-                let images = |d: &Document| d.images.keys().cloned().collect::<Vec<String>>();
-                index.push(json!({"id": b.id, "name": b.name, "time": b.time, "client": b.client, "state": b.state,
-                    "baseImages": images(&b.base), "headImages": images(&b.head)}));
-            }
-            put(&mut z, BRANCH_INDEX, json_options(), &serde_json::to_vec(&json!({"branches": index})).map_err(io_err)?)?;
-        }
-        if let Some(lib) = &doc.published {
-            library::write(&mut z, lib, &written)?;
-        }
-        z.finish().map_err(io_err)?;
-    }
-    Ok(buf.into_inner())
-}
-
-/// Write version history `versions` (oldest first) under `dir`: `<dir>/index.json` and one
-/// `<dir>/<id>.json` snapshot per version. Nothing when there are none.
-fn put_versions<W: Write + Seek>(z: &mut zip::ZipWriter<W>, dir: &str, versions: &[Version]) -> Result<(), FormatError> {
-    if versions.is_empty() {
-        return Ok(());
-    }
-    let mut ids = BTreeSet::new();
-    let mut index = Vec::with_capacity(versions.len());
-    for v in versions {
-        if !is_valid_version_id(&v.id) || !ids.insert(v.id.as_str()) {
-            return Err(FormatError::Io(format!("invalid or duplicate version id `{}`", v.id)));
-        }
-        let name = format!("{dir}/{}.json", v.id);
-        match &v.snapshot {
-            Snapshot::Doc(d) => put_json(z, &name, d)?,
-            Snapshot::Stored { json, .. } => put(z, &name, json_options(), json)?,
-        }
-        let images: Vec<&String> = v.images().keys().collect();
-        let mut entry = json!({"id": v.id, "name": v.name, "description": v.description, "time": v.time, "images": images});
-        if v.auto {
-            entry["auto"] = json!(true);
-        }
-        index.push(entry);
-    }
-    put(z, &format!("{dir}/index.json"), json_options(), &serde_json::to_vec(&json!({"versions": index})).map_err(io_err)?)?;
-    Ok(())
+    ArchiveContent::capture(doc, thumbnail_png, versions, branches)?.encode()
 }
 
 /// Read a `.figcraft` archive (or bare JSON) from bytes. Returns the document and any repairs made.
@@ -760,3 +705,6 @@ mod tests {
         assert!(add_image(&mut Document::new("x"), b"zzz".to_vec()).is_err());
     }
 }
+
+#[cfg(test)]
+mod persistence_tests;

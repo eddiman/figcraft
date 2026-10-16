@@ -37,6 +37,7 @@ pub mod live;
 pub mod measure;
 pub mod online;
 pub mod params;
+pub mod persistence;
 pub mod playground;
 pub mod plugin_directory;
 pub mod plugins;
@@ -295,6 +296,7 @@ pub struct DocState {
     pub page: NodeId,
     pub history: History,
     saved_doc: Arc<Document>,
+    persistence: persistence::State,
     pub path: Option<String>,
     pub revision: u64,
     pub view: ViewState,
@@ -362,9 +364,11 @@ impl DocState {
         doc.link_layer_text_styles();
         let page = doc.current_page.filter(|p| doc.pages.contains(p)).or_else(|| doc.first_page()).unwrap_or(NodeId(0));
         let doc = Arc::new(doc);
+        let persistence = persistence::State::new(doc.clone(), path.is_some());
         let mut st = Self {
             checkpoint: None,
             saved_doc: doc.clone(),
+            persistence,
             doc,
             selection: Vec::new(),
             page,
@@ -402,12 +406,14 @@ impl DocState {
 
     /// With the version history read from its file.
     pub fn with_versions(mut self, versions: Vec<figcraft_format::Version>) -> Self {
+        self.persistence.loaded_versions(&versions);
         self.versions = versions;
         self
     }
 
     /// With the branches read from its file.
     pub fn with_branches(mut self, branches: Vec<figcraft_format::Branch>) -> Self {
+        self.persistence.loaded_branches(&branches);
         self.branches = branches;
         self
     }
@@ -451,7 +457,7 @@ impl DocState {
     }
 
     pub fn is_dirty(&self) -> bool {
-        !Arc::ptr_eq(self.document_itself(), &self.saved_doc) || self.versions_changed
+        self.persistence_dirty()
     }
 
     /// Show `version` in place of the document (or switch to it from another preview).
@@ -493,12 +499,8 @@ impl DocState {
     /// Shown as having unsaved changes until it is saved (a document recovered after a crash).
     pub fn unsaved(mut self) -> Self {
         self.saved_doc = Arc::new(Document::new(self.doc.name.clone()));
+        self.invalidate_baseline();
         self
-    }
-
-    pub fn mark_saved(&mut self) {
-        self.saved_doc = self.doc.clone();
-        self.versions_changed = false;
     }
 
     pub fn doc_mut(&mut self) -> &mut Document {
@@ -743,7 +745,12 @@ impl Session {
             return;
         }
         for ds in &mut self.docs {
-            let untouched = ds.path.is_none() && ds.history.undo.is_empty() && ds.history.redo.is_empty() && !ds.is_dirty() && ds.versions.is_empty();
+            let untouched = ds.initial_baseline_available()
+                && ds.path.is_none()
+                && ds.history.undo.is_empty()
+                && ds.history.redo.is_empty()
+                && !ds.is_dirty()
+                && ds.versions.is_empty();
             let pages = ds.doc.pages.clone();
             let blank = pages.iter().all(|p| {
                 ds.doc.node(*p).is_some_and(|n| {
@@ -762,7 +769,7 @@ impl Session {
             }
             // Still a file without changes.
             ds.doc = Arc::new(doc);
-            ds.saved_doc = ds.doc.clone();
+            ds.initial_theme_baseline();
             ds.revision += 1;
         }
     }
@@ -1653,3 +1660,6 @@ mod version_tests;
 mod view_behaviour_tests;
 #[cfg(test)]
 mod widgets_tests;
+
+#[cfg(test)]
+mod persistence_tests;

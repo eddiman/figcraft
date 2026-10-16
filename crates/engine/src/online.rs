@@ -277,6 +277,14 @@ impl Session {
         self.online_index(&server, &file).map(|_| (plain_server(&server), file, at))
     }
 
+    /// Independent server-pending state for registered online files. A local file
+    /// write must never clear this requirement for a recovery checkpoint.
+    pub(crate) fn registered_online_pending(&self, uid: u64) -> bool {
+        let live = self.live_of(uid);
+        let Some((server, file)) = live.server_file() else { return false };
+        self.online_index(&server, &file).is_some() && live.client().is_some_and(|client| client.pending() != 0)
+    }
+
     /// Settle the recovery copies whose file arrived from its server, or won't (see
     /// [`recover_file`]). Called when something happened in a session.
     pub(crate) fn online_recoveries(&mut self) {

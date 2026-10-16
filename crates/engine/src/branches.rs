@@ -141,17 +141,22 @@ pub(crate) fn sync(s: &mut Session) {
     for d in s.docs.iter_mut() {
         let Some((m, id)) = d.branch_of.clone() else { continue };
         // Versions saved, renamed or deleted on the tab since the last sync.
-        let versions = std::mem::take(&mut d.versions_changed).then(|| d.versions.clone());
+        d.versions_changed = false;
+        let versions = d.versions.clone();
         tabs.push((m, id, d.document_itself().clone(), versions));
     }
     for (main, id, doc, versions) in tabs {
         let Some(ds) = s.docs.iter_mut().find(|d| d.uid == main) else { continue };
-        let Some(i) = ds.branches.iter().position(|b| b.id == id && (versions.is_some() || !Arc::ptr_eq(&b.head, &doc))) else { continue };
+        let Some(i) = ds
+            .branches
+            .iter()
+            .position(|b| b.id == id && (!crate::persistence::versions_same(&versions, &b.versions) || !Arc::ptr_eq(&b.head, &doc)))
+        else {
+            continue;
+        };
         if let Some(b) = ds.branches_mut().get_mut(i) {
             b.head = doc;
-            if let Some(v) = versions {
-                b.versions = v;
-            }
+            b.versions = versions;
         }
     }
 }
@@ -255,6 +260,7 @@ fn open_tab(s: &mut Session, main: u64, id: &str) -> Result<usize> {
     }
     let m = s.docs.iter_mut().find(|d| d.uid == main).ok_or(EngineError::NoDocument)?;
     let b = m.branches.iter_mut().find(|b| b.id == id).ok_or_else(|| bad("branch.open", format!("no branch `{id}`")))?;
+    let old_head = b.head.clone();
     let mut doc = (*b.head).clone();
     // A branch read from a file has no client id yet.
     doc.set_client_id(b.client);
@@ -262,7 +268,10 @@ fn open_tab(s: &mut Session, main: u64, id: &str) -> Result<usize> {
     let mut tab = DocState::new(doc, None).with_versions(b.versions.clone());
     tab.branch_of = Some((main, id.to_string()));
     // The same content: opening isn't an edit of the main file.
-    b.head = tab.doc.clone();
+    m.rebase_open_branch(id, &old_head, &tab.doc)?;
+    if let Some(branch) = m.branches.iter_mut().find(|b| b.id == id) {
+        branch.head = tab.doc.clone();
+    }
     s.docs.push(tab);
     s.active = s.docs.len() - 1;
     Ok(s.active)

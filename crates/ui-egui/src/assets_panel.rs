@@ -925,7 +925,7 @@ fn publish_form(app: &mut FigApp, ui: &mut Ui, w: f32, doc: &Document) {
         form = PublishForm::default();
         // Other files read the saved file.
         app.save();
-        let saved = app.session.ds().is_ok_and(|d| d.path.is_some() && !d.is_dirty());
+        let saved = app.session.ds().is_ok_and(|d| d.path.is_some() && !app.session.file_is_dirty(d.uid));
         let v = r["version"].as_u64().unwrap_or(0);
         app.toast(if saved {
             trf("Published version {v}", &[("v", &v)])

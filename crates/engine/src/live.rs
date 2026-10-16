@@ -1163,7 +1163,7 @@ impl Session {
                     ds.history.redo.clear();
                     ds.doc_mut().set_client_id(client.id());
                     if !was_dirty {
-                        ds.mark_saved();
+                        ds.mark_online_baseline();
                     }
                 }
                 // Edits made since hosting started go out with the first sync.
@@ -1180,7 +1180,7 @@ impl Session {
                     ds.history.undo.clear();
                     ds.history.redo.clear();
                     if !was_dirty {
-                        ds.mark_saved();
+                        ds.mark_online_baseline();
                     }
                 }
                 (uid, Some(doc))

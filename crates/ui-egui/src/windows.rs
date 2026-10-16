@@ -110,9 +110,12 @@ pub fn take_input(app: &mut FigApp, viewport_id: ViewportId) -> Vec<egui::Event>
     }
 }
 
-fn title_of(ds: Option<&DocState>) -> String {
+fn title_of(session: &figcraft_engine::Session, ds: Option<&DocState>) -> String {
     match ds {
-        Some(ds) => format!("{}{} – FigCraft", ds.doc.name, if ds.is_dirty() { " •" } else { "" }),
+        Some(ds) => {
+            let dirty = if ds.branch_of.is_some() { ds.is_dirty() } else { session.file_is_dirty(ds.uid) };
+            format!("{}{} – FigCraft", ds.doc.name, if dirty { " •" } else { "" })
+        }
         None => "FigCraft".into(),
     }
 }
@@ -130,12 +133,17 @@ impl FigApp {
 
     /// The window title: the file it shows and whether it has unsaved changes.
     pub fn title(&self) -> String {
-        title_of(self.session.ds().ok().filter(|d| self.shows(d.uid)))
+        title_of(&self.session, self.session.ds().ok().filter(|d| self.shows(d.uid)))
     }
 
     /// Files in this window with unsaved changes (a branch tab's edits live on in its file).
     fn unsaved(&self) -> Vec<String> {
-        self.session.docs.iter().filter(|d| self.shows(d.uid) && d.is_dirty() && d.branch_of.is_none()).map(|d| d.doc.name.clone()).collect()
+        self.session
+            .docs
+            .iter()
+            .filter(|d| self.shows(d.uid) && self.session.file_is_dirty(d.uid) && d.branch_of.is_none())
+            .map(|d| d.doc.name.clone())
+            .collect()
     }
 }
 
@@ -278,7 +286,7 @@ pub fn list(app: &FigApp) -> Value {
             json!({
                 "id": id,
                 "main": id == 0,
-                "title": title_of(shown),
+                "title": title_of(&app.session, shown),
                 "files": app.session.docs.iter().filter(mine).map(|d| d.doc.name.as_str()).collect::<Vec<_>>(),
                 "active": shown.map(|d| d.doc.name.as_str()),
                 "focused": id == app.windows.focused,
@@ -413,7 +421,7 @@ pub(crate) fn repaint_others(app: &FigApp, ctx: &Context) {
 /// Keep the other windows open (each draws itself when it needs to).
 pub(crate) fn show(app: &FigApp, ctx: &Context) {
     for w in &app.windows.list {
-        let title = title_of(app.session.docs.iter().find(|d| Some(d.uid) == w.active));
+        let title = title_of(&app.session, app.session.docs.iter().find(|d| Some(d.uid) == w.active));
         let mut b = ViewportBuilder::default().with_title(title).with_inner_size(w.size).with_min_inner_size([800.0, 500.0]).with_drag_and_drop(true);
         if let Some(p) = w.pos {
             b = b.with_position(p);
@@ -476,4 +484,37 @@ fn draw(app: &mut FigApp, id: u64, ui: &mut egui::Ui) {
     app.windows.current = 0;
     let main_active = app.windows.main_active.take();
     show_own(app, main_active);
+}
+
+#[cfg(test)]
+mod persistence_tests {
+    use super::*;
+    use figcraft_engine::persistence::{SaveAssurance, SaveDestination, acknowledge_save, encode_save, prepare_save};
+    use serde_json::json;
+    #[test]
+    fn ipad_branch_edit_before_sync_updates_title_and_close_warning() {
+        let mut session = figcraft_engine::Session::new();
+        let main = session.docs[0].uid;
+        session.execute("branch.create", &json!({"name":"Explore"})).unwrap();
+        let prepared = prepare_save(&mut session, main).unwrap();
+        encode_save(&prepared).unwrap();
+        acknowledge_save(&mut session, &prepared, SaveDestination::SaveAs("fixture.figcraft".into()), SaveAssurance::AtomicReplacement).unwrap();
+        let mut app = FigApp::new(session, Box::new(crate::NoServices));
+        app.session.active = 0;
+        assert!(!app.title().contains('•'));
+        let main_doc = app.session.docs[0].doc.clone();
+        app.session.docs[0].doc_mut().name = "Changed main only".into();
+        app.session.active = 1;
+        assert!(!app.title().contains('•'), "an unchanged branch retains its own clean indicator");
+        app.session.docs[0].doc = main_doc;
+        app.session.active = 0;
+        app.session.docs[1].doc_mut().name = "Direct branch edit".into();
+        assert!(app.title().contains('•'));
+        let ctx = Context::default();
+        let mut input = egui::RawInput::default();
+        input.viewports.insert(ViewportId::ROOT, egui::ViewportInfo { events: vec![egui::ViewportEvent::Close], ..Default::default() });
+        ctx.run_ui(input, |ui| on_close_request(&mut app, ui.ctx())).textures_delta.clear();
+        assert!(app.ui.confirm_close);
+        assert_eq!(app.session.docs.len(), 2);
+    }
 }

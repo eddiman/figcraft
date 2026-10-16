@@ -58,7 +58,7 @@ pub fn tab_bar(app: &mut FigApp, ui: &mut Ui) {
             let live = live_mark(app, d.uid);
             let mark_w = if live.is_some() { 18.0 } else { 0.0 };
             // (A file in a session is rarely saved here: its unsaved dot gets room beside the mark.)
-            let dirty = d.is_dirty();
+            let dirty = if d.branch_of.is_some() { d.is_dirty() } else { app.session.file_is_dirty(d.uid) };
             let dot_w = if dirty && live.is_some() { 12.0 } else { 0.0 };
             let w = (regular(12.0).size * 0.6 * name.chars().count() as f32 + 64.0 + mark_w + dot_w).clamp(120.0, 220.0);
             let r = Rect::from_min_size(pos2(x, rect.min.y), vec2(w, HEIGHT));
@@ -167,7 +167,7 @@ pub fn tab_bar(app: &mut FigApp, ui: &mut Ui) {
         }
         if let Some(i) = close {
             // A branch tab's edits live on in its main file: closing it loses nothing.
-            let dirty = app.session.docs.get(i).is_some_and(|d| d.is_dirty() && d.branch_of.is_none());
+            let dirty = app.session.docs.get(i).is_some_and(|d| app.session.file_is_dirty(d.uid) && d.branch_of.is_none());
             if dirty {
                 app.ui.find = None;
                 app.toast(trf(
