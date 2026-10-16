@@ -19,6 +19,7 @@ const TABLE: &[(&str, u8)] = &[
     ("svg", 4),
     ("pdf", 4),
     ("engine", 5),
+    ("recovery", 6),
     ("ui-egui", 6),
     ("mcp", 6),
     // Live sessions over the network (WebSockets): above the engine, beside the UI.

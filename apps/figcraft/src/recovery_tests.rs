@@ -4,7 +4,7 @@
 use figcraft_engine::Session;
 use serde_json::json;
 
-use crate::recovery::{Recovery, recover};
+use crate::recovery::{Recovery, recover, recover_all};
 
 fn root(name: &str) -> std::path::PathBuf {
     let r = std::env::temp_dir().join(format!("figcraft-recovery-{name}-{}", std::process::id()));
@@ -30,11 +30,16 @@ fn a_crashed_runs_unsaved_documents_come_back() {
     // It ends without closing (the lock goes with the process).
     drop(r);
     let mut next = Session::empty();
-    assert_eq!(recover(&root, &mut next), 1);
+    let recovered = recover_all(&root, &mut next);
+    assert_eq!(recovered.copies, 1);
     let ds = next.docs.first().unwrap();
     assert!(ds.is_dirty() && ds.path.is_none());
     assert_eq!(next.doc().unwrap().node(next.doc().unwrap().pages[0]).map(|p| p.children.len()), Some(1));
-    assert!(std::fs::read_dir(&root).unwrap().next().is_none(), "the folder is gone");
+    let mut replacement = Recovery::start(&root).unwrap();
+    replacement.adopt(recovered.waiting);
+    replacement.write(&next, true);
+    replacement.finish();
+    assert!(std::fs::read_dir(&root).unwrap().next().is_none(), "replacement succeeded and normal quit removed its folder");
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -45,8 +50,7 @@ fn copies_follow_saves_and_a_normal_quit_leaves_nothing() {
     let mut r = Recovery::start(&root).unwrap();
     r.write(&s, true);
     let dir = std::fs::read_dir(&root).unwrap().flatten().next().unwrap().path();
-    let copies =
-        |d: &std::path::Path| std::fs::read_dir(d).unwrap().flatten().filter(|f| f.path().extension().is_some_and(|e| e == "figcraft")).count();
+    let copies = |d: &std::path::Path| std::fs::read_dir(d).unwrap().flatten().filter(|f| f.path().join("current").is_file()).count();
     assert_eq!(copies(&dir), 1);
     // Saved: the copy goes.
     s.ds_mut().unwrap().mark_saved();
@@ -54,7 +58,8 @@ fn copies_follow_saves_and_a_normal_quit_leaves_nothing() {
     assert_eq!(copies(&dir), 0);
     // Changes pending while the interval runs: it asks to be woken for them.
     s.execute("shape.rectangle", &json!({"x": 0, "y": 0, "width": 4, "height": 4})).unwrap();
-    assert!(r.tick(&s, 0.0).is_none());
+    assert!(r.tick(&s, 0.0).is_some());
+    r.write(&s, true);
     assert!(r.tick(&s, 1.0).is_none(), "copied at 0 s: nothing new");
     s.execute("shape.rectangle", &json!({"x": 9, "y": 0, "width": 4, "height": 4})).unwrap();
     assert!(r.tick(&s, 1.0).is_some_and(|w| w > 0.0));
@@ -63,17 +68,17 @@ fn copies_follow_saves_and_a_normal_quit_leaves_nothing() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-/// The files named `*.figcraft` in the run folder under `root`.
+/// Committed checkpoints in the run folder under `root`.
 fn copy_count(root: &std::path::Path) -> usize {
     let Some(dir) = std::fs::read_dir(root).unwrap().flatten().next().map(|e| e.path()) else { return 0 };
-    std::fs::read_dir(dir).unwrap().flatten().filter(|f| f.path().extension().is_some_and(|e| e == "figcraft")).count()
+    std::fs::read_dir(dir).unwrap().flatten().filter(|f| f.path().join("current").is_file()).count()
 }
 
 /// A folder at the path of `s`'s first document's copy in the run folder under `root`.
 fn blocked_copy(root: &std::path::Path, s: &Session) -> std::path::PathBuf {
     let dir = std::fs::read_dir(root).unwrap().flatten().next().unwrap().path();
-    let blocker = dir.join(format!("{}.figcraft", s.docs[0].uid));
-    std::fs::create_dir(&blocker).unwrap();
+    let blocker = dir.join(s.docs[0].uid.to_string()).join("current");
+    std::fs::create_dir_all(&blocker).unwrap();
     blocker
 }
 

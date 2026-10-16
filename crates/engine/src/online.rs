@@ -104,6 +104,38 @@ pub struct Recovering {
     at: Resume,
 }
 
+/// Each metadata category may be transferred into an empty category or left
+/// unchanged when its complete serialized members agree. Conflicting IDs never
+/// get concatenated or overwritten.
+fn recovery_metadata_compatible(target: &DocState, branches: &[figcraft_format::Branch], copy: &DocState) -> bool {
+    use figcraft_doc::Document;
+    use figcraft_format::ArchiveContent;
+    let same = |a: std::result::Result<ArchiveContent, figcraft_format::FormatError>,
+                b: std::result::Result<ArchiveContent, figcraft_format::FormatError>| {
+        a.ok().zip(b.ok()).is_some_and(|(a, b)| a.same_persisted_content(&b, false))
+    };
+    let empty = Document::new("Recovery metadata");
+    if !target.versions.is_empty()
+        && !same(ArchiveContent::capture(&empty, None, &target.versions, &[]), ArchiveContent::capture(&empty, None, &copy.versions, &[]))
+    {
+        return false;
+    }
+    if !branches.is_empty() && !same(ArchiveContent::capture(&empty, None, &[], branches), ArchiveContent::capture(&empty, None, &[], &copy.branches))
+    {
+        return false;
+    }
+    if target.document_itself().published.is_some() {
+        let mut a = empty.clone();
+        a.published = target.document_itself().published.clone();
+        let mut b = empty;
+        b.published = copy.document_itself().published.clone();
+        if !same(ArchiveContent::capture(&a, None, &[], &[]), ArchiveContent::capture(&b, None, &[], &[])) {
+            return false;
+        }
+    }
+    true
+}
+
 /// A name as shown: no control characters, at most 256 characters.
 fn clean_name(s: &str) -> String {
     s.trim().chars().filter(|c| !c.is_control()).take(256).collect()
@@ -314,24 +346,56 @@ impl Session {
         let name = r.copy.doc.name.clone();
         let me = client.resume();
         let ahead = figcraft_collab::diff(client.view(), &r.copy.doc).map(|d| d.changes);
-        if ahead.as_ref().is_ok_and(Vec::is_empty) {
-            return;
-        }
+        // Compare complete local archive metadata separately from collaboration
+        // changes. The collaboration protocol does not carry local history.
+        let compatible = self.docs.iter().find(|d| d.uid == uid).is_some_and(|target| {
+            let mut branches = target.branches.clone();
+            for tab in &self.docs {
+                if let Some((main, id)) = &tab.branch_of
+                    && *main == uid
+                    && let Some(branch) = branches.iter_mut().find(|b| b.id == *id)
+                {
+                    branch.head = tab.document_itself().clone();
+                    branch.versions = tab.versions.clone();
+                }
+            }
+            recovery_metadata_compatible(target, &branches, &r.copy)
+        });
+        let equal = ahead.as_ref().is_ok_and(Vec::is_empty);
         // New layers must be this client's to create (the server refuses anyone else's ids).
         let own = |changes: &[Change]| changes.iter().all(|c| !matches!(c, Change::Create { id, .. } if id.0 >> 32 != u64::from(me.client_id)));
-        if me == r.at && client.access() == Access::Edit && ahead.as_deref().is_ok_and(own) {
-            let mut doc = (*r.copy.doc).clone();
-            doc.set_client_id(me.client_id);
-            self.apply_remote(uid, std::sync::Arc::new(doc));
-            self.live_edit(uid, Some("Recovered changes"));
-            self.message = Some(format!("Recovered your changes to {name} that hadn't reached the server"));
+        let merge = me == r.at && client.access() == Access::Edit && ahead.as_deref().is_ok_and(own);
+        if compatible && (equal || merge) {
+            if !equal {
+                let mut doc = (*r.copy.doc).clone();
+                doc.set_client_id(me.client_id);
+                self.apply_remote(uid, std::sync::Arc::new(doc));
+                self.live_edit(uid, Some("Recovered changes"));
+                self.message = Some(format!("Recovered your changes to {name} that hadn't reached the server"));
+            }
+            if let Some(target) = self.docs.iter_mut().find(|d| d.uid == uid) {
+                if target.versions.is_empty() && !r.copy.versions.is_empty() {
+                    *target.versions_mut() = r.copy.versions.clone();
+                }
+                if target.branches.is_empty() && !r.copy.branches.is_empty() {
+                    *target.branches_mut() = r.copy.branches.clone();
+                }
+                if target.document_itself().published.is_none() && r.copy.document_itself().published.is_some() {
+                    target.doc_mut().published = r.copy.document_itself().published.clone();
+                }
+            }
             return;
         }
         let mut copy = *r.copy;
         std::sync::Arc::make_mut(&mut copy.doc).name = format!("{name} (recovered copy)");
         self.docs.push(copy);
-        self.message =
-            Some(format!("{name} changed on the server before your last changes reached it: they are open beside it as “{name} (recovered copy)”"));
+        self.message = Some(if !compatible {
+            format!(
+                "{name} has different local history, branches or published library data: your recovered file is open beside it as “{name} (recovered copy)”"
+            )
+        } else {
+            format!("{name} changed on the server before your last changes reached it: they are open beside it as “{name} (recovered copy)”")
+        });
     }
 
     /// The session open on recorded file `f`, if one is.

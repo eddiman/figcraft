@@ -1416,6 +1416,7 @@ dependencies = [
  "figcraft-collab-net",
  "figcraft-engine",
  "figcraft-format",
+ "figcraft-recovery",
  "figcraft-text",
  "figcraft-ui-egui",
  "fmv-macos-events",
@@ -1643,6 +1644,17 @@ dependencies = [
  "thiserror 2.0.21",
  "wasmi",
  "wat",
+]
+
+[[package]]
+name = "figcraft-recovery"
+version = "0.6.0"
+dependencies = [
+ "figcraft-engine",
+ "figcraft-format",
+ "log",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

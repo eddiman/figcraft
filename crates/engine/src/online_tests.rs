@@ -583,3 +583,163 @@ fn debug_output_of_a_record_leaves_the_secrets_out() {
     no_secrets("debug", &text);
     assert!(text.contains("share.example") && text.contains(".."), "{text}");
 }
+
+fn recovery_metadata_case(conflict: Option<&str>, same_metadata: bool) {
+    use figcraft_collab::message::ServerMsg;
+    use figcraft_collab::{Client, Limits, Outgoing, Server};
+    use figcraft_doc::{Document, LibraryManifest, PublishedLibrary};
+    let (mut original, script) = session();
+    shared_online(&mut original, &script, "f1");
+    ex(&mut original, "file.saveVersion", json!({"name":"Recovered history"}));
+    let main = original.active;
+    ex(&mut original, "branch.create", json!({"name":"Recovered branch"}));
+    original.ds_mut().unwrap().doc_mut().name = "Unsynchronized branch".into();
+    original.active = main;
+    original.doc_mut().unwrap().published = Some(Arc::new(PublishedLibrary {
+        manifest: LibraryManifest { id: "recovered-library".into(), ..Default::default() },
+        doc: Arc::new(Document::new("Recovered publication")),
+    }));
+    let id = original.ds().unwrap().uid;
+    let bytes = crate::persistence::encode_recovery(&crate::persistence::capture_recovery(&original, id).unwrap()).unwrap();
+    let captured = figcraft_format::load_bytes_with_versions(&bytes).unwrap();
+    match conflict {
+        Some("cleared-history") => original.ds_mut().unwrap().versions_mut().clear(),
+        Some("cleared-branch") => original.ds_mut().unwrap().branches_mut().clear(),
+        Some("cleared-published") => original.doc_mut().unwrap().published = None,
+        _ => {}
+    }
+    let bytes = crate::persistence::encode_recovery(&crate::persistence::capture_recovery(&original, id).unwrap()).unwrap();
+    let path = std::env::temp_dir().join(format!(
+        "figcraft-ipad-online-metadata-{}-{}-{}.figcraft",
+        std::process::id(),
+        conflict.unwrap_or("none"),
+        same_metadata
+    ));
+    std::fs::write(&path, bytes).unwrap();
+    let mut server = Server::new(original.doc().unwrap().clone(), "", Limits::default());
+    let ClientMsg::Hello(hello) = Client::hello("f1", "", "Me", "") else { panic!("hello") };
+    let (_, outgoing) = server.join(hello).unwrap();
+    let welcome = outgoing
+        .into_iter()
+        .find_map(|o| match o {
+            Outgoing::To(_, m @ ServerMsg::Welcome { .. }) => Some(m),
+            _ => None,
+        })
+        .unwrap();
+    let at = Client::join(welcome.clone()).unwrap().resume();
+    let (mut next, script) = with_prefs(restarted(&original));
+    ex(&mut next, "collab.recoverFile", json!({"path":path,"server":SERVER,"file":"f1","session":at.session,"client":at.client_id,"seq":at.seq}));
+    std::fs::remove_file(path).unwrap();
+    // Delay reconciliation while the target receives local metadata. This also
+    // exercises comparisons against reconstructed archive roots.
+    let recovering = std::mem::take(&mut next.live.recovering);
+    script
+        .lock()
+        .unwrap()
+        .events
+        .extend([Event::Welcome { info: info(Role::Guest, "Homepage", &edit_link(SERVER, "f1")), peers: vec![] }, Event::Sync(welcome)]);
+    next.live_poll();
+    assert_eq!(next.docs.len(), 2);
+    if same_metadata || conflict.is_some() {
+        let target = &mut next.docs[1];
+        *target.versions_mut() = captured.versions.clone();
+        *target.branches_mut() = captured.branches.clone();
+        target.doc_mut().published = captured.doc.published.clone();
+        match conflict {
+            Some("history") => target.versions_mut()[0].description = "Different local history".into(),
+            Some("branch") => Arc::make_mut(&mut target.branches_mut()[0].head).name = "Different local branch".into(),
+            // The manifest deliberately stays equal. Its snapshot must still be compared.
+            Some("published") => {
+                Arc::make_mut(&mut Arc::make_mut(target.doc_mut().published.as_mut().unwrap()).doc).name = "Different local publication".into()
+            }
+            _ => {}
+        }
+    }
+    next.live.recovering = recovering;
+    next.online_recoveries();
+    if conflict.is_none() {
+        let ClientMsg::Hello(hello) = Client::hello("f1", "", "Other", "") else { panic!("hello") };
+        let (other, outs) = server.join(hello).unwrap();
+        let welcome = outs
+            .into_iter()
+            .find_map(|o| match o {
+                Outgoing::To(_, m @ ServerMsg::Welcome { .. }) => Some(m),
+                _ => None,
+            })
+            .unwrap();
+        let mut them = Client::join(welcome).unwrap();
+        let mut remote = them.document().clone();
+        remote.name = "Subsequent remote update".into();
+        let batch = them.edit(&remote).unwrap().unwrap();
+        let changes = server
+            .receive(other, batch)
+            .into_iter()
+            .filter_map(|o| match o {
+                Outgoing::All(m @ ServerMsg::Changes { .. }) => Some(Event::Sync(m)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(!changes.is_empty(), "the server accepted and distributed the follow-up change");
+        script.lock().unwrap().events.extend(changes);
+        next.live_poll();
+        assert_eq!(next.docs[1].doc.name, "Subsequent remote update");
+    }
+    let recovered = if conflict.is_some() {
+        assert_eq!(next.docs.len(), 3, "conflicting metadata requires a full side copy");
+        assert!(next.docs[2].is_dirty() && next.docs[2].path.is_none());
+        match conflict {
+            Some("history") => assert_eq!(next.docs[1].versions[0].description, "Different local history"),
+            Some("branch") => assert_eq!(next.docs[1].branches[0].head.name, "Different local branch"),
+            Some("published") => assert_eq!(next.docs[1].doc.published.as_ref().unwrap().doc.name, "Different local publication"),
+            _ => {}
+        }
+        &next.docs[2]
+    } else {
+        assert_eq!(next.docs.len(), 2, "equivalent document content can accept local metadata");
+        assert!(next.docs[1].is_dirty(), "the server does not acknowledge local archive metadata");
+        &next.docs[1]
+    };
+    if conflict == Some("cleared-history") {
+        assert!(recovered.versions.is_empty());
+    } else {
+        assert_eq!(recovered.versions[0].name, "Recovered history");
+        assert_eq!(recovered.versions[0].description, "");
+    }
+    if conflict == Some("cleared-branch") {
+        assert!(recovered.branches.is_empty());
+    } else {
+        assert_eq!(recovered.branches[0].head.name, "Unsynchronized branch");
+    }
+    if conflict == Some("cleared-published") {
+        assert!(recovered.doc.published.is_none());
+    } else {
+        assert_eq!(recovered.doc.published.as_ref().unwrap().doc.name, "Recovered publication");
+    }
+}
+#[test]
+fn ipad_equal_online_document_retains_recovered_metadata() {
+    recovery_metadata_case(None, false);
+}
+#[test]
+fn ipad_equal_online_metadata_is_not_duplicated() {
+    recovery_metadata_case(None, true);
+}
+#[test]
+fn ipad_online_history_conflict_preserves_full_side_copy() {
+    recovery_metadata_case(Some("history"), false);
+}
+#[test]
+fn ipad_online_branch_conflict_preserves_full_side_copy() {
+    recovery_metadata_case(Some("branch"), false);
+}
+#[test]
+fn ipad_online_published_snapshot_conflict_preserves_full_side_copy() {
+    recovery_metadata_case(Some("published"), false);
+}
+
+#[test]
+fn ipad_online_cleared_metadata_conflicts_remain_separate() {
+    for category in ["cleared-history", "cleared-branch", "cleared-published"] {
+        recovery_metadata_case(Some(category), false);
+    }
+}

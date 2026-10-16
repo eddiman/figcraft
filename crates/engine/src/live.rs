@@ -871,6 +871,13 @@ impl Session {
     /// stay where they can, and the undo history isn't touched.
     pub fn apply_remote(&mut self, uid: u64, doc: Arc<Document>) {
         let Some(ds) = self.docs.iter_mut().find(|d| d.uid == uid) else { return };
+        // Collaboration replicas omit the local published-library snapshot. Keep
+        // the underlying file's publication through subsequent remote updates.
+        let publication = ds.document_itself().published.clone();
+        let mut doc = doc;
+        if doc.published.is_none() && publication.is_some() {
+            Arc::make_mut(&mut doc).published = publication;
+        }
         ds.doc = doc;
         if !ds.doc.pages.contains(&ds.page) {
             ds.page = ds.doc.first_page().unwrap_or(ds.page);
