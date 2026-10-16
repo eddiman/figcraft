@@ -27,6 +27,8 @@ struct Shell {
     field: String,
     fit_requested: bool,
     smoke: bool,
+    recovery: crate::recovery::Shared,
+    _lifecycle: figcraft_apple_ipad::LifecycleHost,
 }
 
 impl eframe::App for Shell {
@@ -59,6 +61,14 @@ impl eframe::App for Shell {
                 self.fit_requested = true;
             }
             figcraft_ui_egui::windows::guard(fig, &ctx, |fig| fig.ui(ui));
+            crate::recovery::try_with(&self.recovery, |coordinator| {
+                if let Some(wait) = coordinator.tick(&fig.session, ctx.input(|i| i.time)) {
+                    ctx.request_repaint_after(std::time::Duration::try_from_secs_f64(wait).unwrap_or(std::time::Duration::from_millis(50)));
+                }
+                if let Some(notice) = coordinator.take_notice() {
+                    fig.toast(notice);
+                }
+            });
         });
     }
 }
@@ -66,8 +76,22 @@ impl eframe::App for Shell {
 pub fn run() -> Result<(), Box<dyn Error>> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let smoke = std::env::args().any(|arg| arg == "--smoke");
-    let session = if smoke { Session::with_document(small_fixture()?) } else { Session::new() };
-    let mut fig = FigApp::new(session, Box::new(IPadServices::new()?));
+    let mut session = Session::empty();
+    let coordinator = crate::recovery::Coordinator::open(&crate::recovery::support_dir()?.join("Recovery"), &mut session)?;
+    let restored = coordinator.restored();
+    if session.docs.is_empty() {
+        if smoke {
+            session.docs.extend(Session::with_document(small_fixture()?).docs);
+            session.active = 0;
+        } else {
+            session.execute("file.new", &serde_json::json!({}))?;
+        }
+    }
+    let recovery = std::sync::Arc::new(std::sync::Mutex::new(coordinator));
+    let mut fig = FigApp::new(session, Box::new(IPadServices::new(recovery.clone())?));
+    if restored > 0 {
+        fig.toast("Recovered your unsaved work.");
+    }
     fig.ui.home = false;
     figcraft_ui_egui::windows::install(fig);
     let mut options = eframe::NativeOptions { renderer: eframe::Renderer::Wgpu, ..Default::default() };
@@ -82,6 +106,14 @@ pub fn run() -> Result<(), Box<dyn Error>> {
         });
     }
 
-    eframe::run_native("FigCraft iPad", options, Box::new(move |_cc| Ok(Box::new(Shell { field: String::new(), fit_requested: false, smoke }))))?;
+    eframe::run_native(
+        "FigCraft iPad",
+        options,
+        Box::new(move |cc| {
+            let lifecycle = figcraft_apple_ipad::LifecycleHost::new(crate::lifecycle::callback(recovery.clone(), cc.egui_ctx.clone()))
+                .map_err(std::io::Error::other)?;
+            Ok(Box::new(Shell { field: String::new(), fit_requested: false, smoke, recovery, _lifecycle: lifecycle }))
+        }),
+    )?;
     Ok(())
 }

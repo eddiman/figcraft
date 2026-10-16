@@ -36,7 +36,7 @@ The Release configuration is not a release-qualification path: the scheme and sc
 
 ## Simulator smoke
 
-The default app opens a shared blank editor with the iPad capability provider. Native file pickers, persistence and clipboard adapters have not been added. The provider explicitly disables multiple windows, reveal, local hosting and plugin downloads; shared request submission rejects Unsupported until a native adapter is supplied. Pass `--smoke` for the deterministic T01 small fixture and ordinary egui field; the Xcode launch scheme enables this argument for development.
+The default app opens a shared blank editor with the iPad capability provider. Native copy pickers support import and export. Recovery uses completed checkpoints under Library/Application Support/FigCraft/Recovery, adopts previous-run copies at startup, and requests a bounded checkpoint when the application becomes inactive. Native Save and clipboard adapters remain pending. The provider explicitly disables multiple windows, reveal, local hosting and plugin downloads; unsupported requests return Unsupported. Pass `--smoke` for the deterministic T01 small fixture and ordinary egui field; the Xcode launch scheme enables this argument for development.
 
 ```sh
 xcrun simctl install BCCE5B8D-96D3-45C1-84DD-3E0C84C9AE99 target/ipad-xcode/simulator/Build/Products/Debug-iphonesimulator/FigcraftIPad.app
@@ -69,3 +69,11 @@ The app installs IPadServices from apps/figcraft-ipad/src/services.rs. Open/impo
 The reviewed bridge lives in platform/apple-ipad, an isolated Rust workspace. Its private native.rs contains the D07 UIKit exception; shared/app safety lints remain unchanged. Root host CI does not run its standalone checks. With DEVELOPER_DIR set to the existing Xcode installation, run packaging/ipad/check-bridge.sh simulator and packaging/ipad/check-bridge.sh device in addition to the normal build checks. These commands test callback containment on the host and lint the target-specific bridge. They do not claim physical-device execution.
 
 The production Info.plist does not enable document-browser or in-place editing/file-sharing flags. Files are opened as copies. The isolated simulator probe used separate file-sharing flags only to expose its own synthetic fixtures; those flags are not part of this application.
+
+## Recovery development checks (T11)
+
+The app starts shared recovery with Synced filesystem durability, schedules foreground checkpoints through the UI clock and installs the D11 lifecycle observer. Startup opens completed previous-run copies as unsaved documents before displaying the editor. A checkpoint does not acknowledge collaboration changes or count as a user save. Native termination starts a nonblocking attempt and preserves completed copies.
+
+A UIKit background task allows polling for up to five seconds while the app becomes inactive. Capture retries when the editor is already borrowed. Completion, failure, deadline, expiration, resume and host destruction release the lease. A failed or expired attempt keeps preceding recovery copies and reports a notice on the next available UI frame. Large snapshot capture latency and physical suspension behavior still require measurement.
+
+Run cargo test --locked -p figcraft-ipad for the portable coordinator and file-resource tests. Run check-bridge.sh for both targets because root CI does not cover native bridge code. Simulator notifications and injected expiration can exercise callback ownership, but physical termination/relaunch and ten device suspend/resume cycles remain deferred qualification checks.

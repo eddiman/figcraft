@@ -1576,6 +1576,7 @@ dependencies = [
  "figcraft-doc",
  "figcraft-engine",
  "figcraft-format",
+ "figcraft-recovery",
  "figcraft-text",
  "figcraft-ui-egui",
  "image",

@@ -4,6 +4,10 @@ mod app;
 #[cfg(any(target_os = "ios", test))]
 mod documents;
 #[cfg(target_os = "ios")]
+mod lifecycle;
+#[cfg(any(target_os = "ios", test))]
+mod recovery;
+#[cfg(target_os = "ios")]
 mod services;
 
 #[cfg(target_os = "ios")]

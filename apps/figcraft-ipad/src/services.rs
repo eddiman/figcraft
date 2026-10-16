@@ -19,6 +19,7 @@ struct Prepared {
 }
 pub struct IPadServices {
     host: Host,
+    recovery: crate::recovery::Shared,
     imports: PathBuf,
     context: Option<egui::Context>,
     queued: VecDeque<Rc<Prepared>>,
@@ -26,9 +27,10 @@ pub struct IPadServices {
     completed: VecDeque<Completion>,
 }
 impl IPadServices {
-    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(recovery: crate::recovery::Shared) -> Result<Self, Box<dyn std::error::Error>> {
         let home = std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| std::io::Error::other("application home is unavailable"))?;
         Ok(Self {
+            recovery,
             host: Host::new().map_err(std::io::Error::other)?,
             imports: home.join("Library/Application Support/FigCraft/Imports"),
             context: None,
@@ -135,6 +137,10 @@ impl IPadServices {
     }
 }
 impl Services for IPadServices {
+    fn emergency_save(&mut self, session: &figcraft_engine::Session) {
+        crate::lifecycle::emergency(&self.recovery, session);
+    }
+
     fn capabilities(&self) -> PlatformCapabilities {
         PlatformCapabilities::ipad()
     }

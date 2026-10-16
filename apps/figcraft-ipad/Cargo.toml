@@ -15,6 +15,7 @@ log = { workspace = true }
 [target.'cfg(target_os = "ios")'.dependencies]
 figcraft-apple-ipad = { path = "../../platform/apple-ipad" }
 figcraft-engine = { workspace = true }
+figcraft-recovery = { workspace = true }
 figcraft-text = { workspace = true }
 figcraft-ui-egui = { workspace = true }
 figcraft-doc = { workspace = true }
@@ -26,3 +27,9 @@ image = { workspace = true }
 serde_json = { workspace = true }
 
 env_logger = { version = "0.11", default-features = false, features = ["auto-color", "humantime"] }
+
+[dev-dependencies]
+figcraft-engine = { workspace = true }
+figcraft-recovery = { workspace = true }
+figcraft-apple-ipad = { path = "../../platform/apple-ipad" }
+serde_json = { workspace = true }
