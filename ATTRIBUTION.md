@@ -27,6 +27,10 @@ Release builds embed fonts from the optional craft-fonts build input
 | Inter | SIL Open Font License 1.1 | https://github.com/rsms/inter |
 | Roboto, Montserrat, Lato, Open Sans, Poppins, Nunito Sans, Merriweather, Playfair Display, Source Sans 3, Source Serif 4, Carlito, Caladea | SIL Open Font License 1.1 | Google Fonts / upstream repositories (see craft-fonts) |
 | Liberation Sans, Serif, Mono | SIL Open Font License 1.1 | https://github.com/liberationfonts |
-| BIZ UDPGothic, BIZ UDMincho, Shippori Mincho, Noto Sans Arabic | SIL Open Font License 1.1 | Google Fonts (see craft-fonts) |
+| BIZ UDPGothic, BIZ UDMincho, Shippori Mincho, Noto Sans CJK SC, Noto Sans Arabic, Noto Sans Thai | SIL Open Font License 1.1 | Google Fonts (see craft-fonts) |
 
 egui's default fonts (compiled into the `egui`/`epaint` crates) keep their own licences (OFL / Apache-2.0 / Ubuntu Font Licence); see those crates.
+
+The initial iPad profile pins seven external files and license hashes in
+`maintenance/ipad-fonts.json`. Required iPad bundles include those OFL texts and
+that profile. Font bytes remain in the external craft-fonts checkout.

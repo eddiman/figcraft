@@ -253,7 +253,7 @@ pub fn install_fonts(ctx: &Context, system: bool, cjk: u8) {
     semi.extend(fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default());
     fonts.families.insert(FontFamily::Name("semibold".into()), semi);
     // CJK and other scripts from craft-fonts as fallbacks (Noto Sans CJK only with FIGCRAFT_EMBED_CJK).
-    const BUILT_IN: [&str; 4] = ["Inter", "BIZ UDPGothic", "Noto Sans CJK SC", "Noto Sans Arabic"];
+    const BUILT_IN: [&str; 5] = ["Inter", "BIZ UDPGothic", "Noto Sans CJK SC", "Noto Sans Arabic", "Noto Sans Thai"];
     let lang = crate::i18n::current().map_or("en", |l| l.code);
     // A Chinese UI draws Han in a Chinese face: the built-in Japanese one goes after the system faces.
     let late = |family: &str| family == "BIZ UDPGothic" && crate::cjk::language(lang) == crate::cjk::HAN;
@@ -330,4 +330,28 @@ pub fn set_doc_profile(ctx: &Context, profile: figcraft_color::ColorProfile) {
 pub fn doc_c32(ctx: &Context, c: figcraft_color::Color) -> Color32 {
     let conv = ctx.data(|d| d.get_temp::<figcraft_color::ProfileConversion>(screen_conversion_id()));
     c32(conv.map_or(c, |k| k.apply(c)))
+}
+
+#[cfg(test)]
+mod ipad_font_tests {
+    use super::*;
+
+    #[test]
+    fn ipad_embedded_ui_scripts_have_glyphs_without_system_fonts() {
+        if figcraft_text::CRAFT_FONTS.is_empty() && std::env::var_os("FIGCRAFT_IPAD_FONT_TESTS_REQUIRED").is_none() {
+            eprintln!("iPad UI coverage not exercised: optional font input absent");
+            return;
+        }
+        let ctx = Context::default();
+        install_fonts(&ctx, false, 0);
+        ctx.run_ui(Default::default(), |_| {}).drop_without_applying_deltas();
+        ctx.fonts_mut(|fonts| {
+            for family in [FontFamily::Proportional, FontFamily::Name("semibold".into())] {
+                let id = FontId::new(12.0, family);
+                for sample in ["FigCraft Åæø", "日本語", "们漢한", "مرحبا", "ไทย"] {
+                    assert!(fonts.has_glyphs(&id, sample), "{sample}: UI glyph coverage");
+                }
+            }
+        });
+    }
 }

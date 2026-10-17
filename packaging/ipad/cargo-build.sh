@@ -4,6 +4,7 @@ set -euo pipefail
 IPAD_DIR="$(cd "$(dirname "$0")" && pwd)"
 IPAD_REPO="$(cd "$IPAD_DIR/../.." && pwd)"
 source "$IPAD_DIR/prerequisites.sh"
+source "$IPAD_DIR/font-inputs.sh"
 case "${PLATFORM_NAME:-}" in
     iphonesimulator) IPAD_SDK=iphonesimulator; IPAD_TARGET=aarch64-apple-ios-sim ;;
     iphoneos) IPAD_SDK=iphoneos; IPAD_TARGET=aarch64-apple-ios ;;
@@ -22,7 +23,10 @@ case "$IPAD_TARGET" in
     aarch64-apple-ios) export CARGO_TARGET_AARCH64_APPLE_IOS_LINKER="$IPAD_CLANG" ;;
 esac
 cd "$IPAD_REPO"
+ipad_prepare_fonts
 cargo build --locked -p figcraft-ipad --target "$IPAD_TARGET"
 [[ -n "${TARGET_BUILD_DIR:-}" && -n "${EXECUTABLE_PATH:-}" ]] || ipad_fail "Xcode executable destination is missing"
 mkdir -p "$(dirname "$TARGET_BUILD_DIR/$EXECUTABLE_PATH")"
 install -m 755 "$CARGO_TARGET_DIR/$IPAD_TARGET/debug/figcraft-ipad" "$TARGET_BUILD_DIR/$EXECUTABLE_PATH"
+
+ipad_bundle_fonts "$(dirname "$TARGET_BUILD_DIR/$EXECUTABLE_PATH")"

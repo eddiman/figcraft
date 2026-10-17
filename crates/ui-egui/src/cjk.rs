@@ -67,13 +67,17 @@ pub fn language(code: &str) -> u8 {
 }
 
 /// Whether the UI can draw language `code`: always on desktop (a system face is found when it's
-/// needed; tofu at worst), on the web only with built-in faces for its scripts. The language
+/// needed; tofu at worst), on the web and iPad only with built-in faces for its scripts. The language
 /// picker and the system language skip a language it can't.
 pub fn can_show(code: &str) -> bool {
+    can_show_with(code, !cfg!(any(target_arch = "wasm32", target_os = "ios")), &|c| {
+        figcraft_text::face_with_char(c, &["BIZ UDPGothic", "Noto Sans CJK SC"]).is_some()
+    })
+}
+
+fn can_show_with(code: &str, system: bool, has: &dyn Fn(char) -> bool) -> bool {
     let need = language(code);
-    need == 0
-        || !cfg!(target_arch = "wasm32")
-        || samples(need, 0).iter().all(|(c, _)| figcraft_text::face_with_char(*c, &["BIZ UDPGothic", "Noto Sans CJK SC"]).is_some())
+    need == 0 || system || samples(need, 0).iter().all(|(c, _)| has(*c))
 }
 
 /// A character standing for each script in `need`, with the families to look for it in, the UI
@@ -115,6 +119,19 @@ pub fn faces(need: u8, lang: &str, have: &dyn Fn(char) -> bool) -> Vec<Arc<Face>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ipad_cjk_unavailable_is_explicit() {
+        assert!(can_show_with("en", false, &|_| false));
+        for code in ["ja", "ko", "zh-Hans"] {
+            assert!(!can_show_with(code, false, &|_| false));
+            assert!(can_show_with(code, true, &|_| false), "desktop behavior is preserved");
+        }
+        assert!(!can_show_with("ja", false, &|c| c == 'あ'), "kana alone cannot qualify Japanese Han");
+        assert!(can_show_with("ja", false, &|c| "あ漢".contains(c)));
+        assert!(can_show_with("ko", false, &|c| c == '한'));
+        assert!(can_show_with("zh-Hans", false, &|c| c == '们'));
+    }
 
     #[test]
     fn scripts_and_languages() {

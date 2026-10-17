@@ -40,7 +40,7 @@ fn system_fonts_are_scanned_once() {
     scan_system_fonts_on_demand();
     let _ = db();
     scan_system_fonts();
-    let walked = !system_fonts_opted_out();
+    let walked = !cfg!(any(target_os = "ios", target_arch = "wasm32")) && !system_fonts_opted_out();
     assert_eq!(SCANS.load(Ordering::Relaxed), usize::from(walked));
     assert_eq!(system_fonts_scanned(), walked);
 }
@@ -65,5 +65,66 @@ fn the_scan_reads_names_like_a_whole_file_read() {
     for p in files {
         let Ok(whole) = std::fs::read(&p) else { continue };
         assert_eq!(faces_in(&index_bytes(&p, whole.len()).unwrap()), faces_in(&whole), "{}", p.display());
+    }
+}
+
+#[test]
+fn ipad_embedded_font_available() {
+    if CRAFT_FONTS.is_empty() && std::env::var_os("FIGCRAFT_IPAD_FONT_TESTS_REQUIRED").is_none() {
+        eprintln!("iPad font coverage not exercised: optional craft-fonts input absent");
+        return;
+    }
+    let samples = [
+        ("BIZ UDPGothic", "Regular", "FigCraft Åå Ææ Øø é ñ あ漢"),
+        ("BIZ UDPGothic", "Bold", "FigCraft Åå Ææ Øø é ñ"),
+        ("Shippori Mincho", "Regular", "日本語"),
+        ("BIZ UDMincho", "Regular", "日本語"),
+        ("Noto Sans CJK SC", "Regular", "们漢한"),
+        ("Noto Sans Arabic", "Regular", "مرحبا"),
+        ("Noto Sans Thai", "Regular", "ไทย"),
+    ];
+    for (family, style, text) in samples {
+        let input = CRAFT_FONTS.iter().find(|f| f.family == family && f.style == style).unwrap();
+        let face = Face::from_bytes(FontBytes::Static(input.bytes), 0, Some(family), Some(style)).unwrap();
+        assert!(text.chars().all(|c| face.has_char(c)), "{family}/{style}: {text}");
+    }
+}
+
+#[test]
+fn ipad_embedded_document_scripts_and_missing_font_fallback() {
+    if CRAFT_FONTS.is_empty() && std::env::var_os("FIGCRAFT_IPAD_FONT_TESTS_REQUIRED").is_none() {
+        eprintln!("iPad document font coverage not exercised: optional input absent");
+        return;
+    }
+    let mut isolated = FontDb::default();
+    for input in CRAFT_FONTS {
+        isolated.add(Face::from_bytes(FontBytes::Static(input.bytes), 0, Some(input.family), Some(input.style)).unwrap());
+    }
+    assert!(isolated.find("Synthetic unavailable font", "Regular").is_none());
+    let fallback = isolated.default_face_for(true).unwrap();
+    assert_eq!(fallback.family, "BIZ UDPGothic");
+    for sample in ["FigCraft Åæø", "日本語", "们漢한", "مرحبا", "ไทย"] {
+        let mut text = figcraft_doc::TextData::new(sample);
+        text.style.font_family = fallback.family.clone();
+        let before = text.clone();
+        let layout = crate::layout(&text, None, None);
+        assert!(!layout.glyphs.is_empty(), "{sample}: document glyphs");
+        assert!(layout.glyphs.iter().all(|g| g.gid != 0 && g.advance.is_finite()), "{sample}: no missing glyphs");
+        assert!(layout.width.is_finite() && layout.width > 0.0);
+        assert_eq!(text, before, "font resolution cannot rewrite requested document styles");
+    }
+}
+
+#[test]
+fn ipad_no_unix_font_scan() {
+    if cfg!(any(target_os = "ios", target_arch = "wasm32")) {
+        let mut isolated = FontDb::default();
+        isolated.scan_system();
+        assert!(!isolated.system_scanned);
+        assert!(isolated.pending.is_empty());
+        assert!(system_font_dirs().is_empty());
+    } else {
+        // The iOS branch is compiled by IOS-CHECK; this host cannot execute it.
+        assert!(!system_font_dirs().is_empty());
     }
 }

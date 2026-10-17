@@ -77,3 +77,31 @@ The app starts shared recovery with Synced filesystem durability, schedules fore
 A UIKit background task allows polling for up to five seconds while the app becomes inactive. Capture retries when the editor is already borrowed. Completion, failure, deadline, expiration, resume and host destruction release the lease. A failed or expired attempt keeps preceding recovery copies and reports a notice on the next available UI frame. Large snapshot capture latency and physical suspension behavior still require measurement.
 
 Run cargo test --locked -p figcraft-ipad for the portable coordinator and file-resource tests. Run check-bridge.sh for both targets because root CI does not cover native bridge code. Simulator notifications and injected expiration can exercise callback ownership, but physical termination/relaunch and ten device suspend/resume cycles remain deferred qualification checks.
+
+
+## Embedded font profile (T12)
+
+Development builds may omit craft-fonts; the app then reports that document fonts
+are unavailable. iOS does not search desktop Unix font directories. Latin UI text
+continues to use egui's bundled fonts.
+
+For document text and script fallbacks, use the exact revision and seven files
+in `maintenance/ipad-fonts.json`, from the external craft-fonts repository. Set
+`CRAFT_FONTS_DIR` to that checkout's absolute path before building. The native
+recipe validates the commit, primary manifest, font hashes and license hashes,
+embeds CJK as well as the other declared fonts, and includes OFL texts and the
+profile in the app bundle. It never creates a missing Latin manifest. Run
+`cargo xtask ipad-fonts check /absolute/path/to/craft-fonts` to check inputs alone.
+
+Set `FIGCRAFT_IPAD_REQUIRE_FONTS=1` to reject absent inputs in a development build;
+Xcode Release configurations require them automatically. Current build.sh targets
+still produce development Debug bundles. An existing but mismatched input set
+fails validation rather than being accepted as the pinned profile. Other hosts
+retain their existing optional two-manifest build recipe.
+
+The pinned revision has no Inter files. Requested document font names are retained;
+iOS prefers BIZ UDPGothic Regular when a requested primary font is unavailable.
+Its metrics can change line wrapping and text bounds. Compare desktop/native text
+using the same explicit BIZ UDPGothic font before assessing rendering parity.
+UI language availability for CJK requires the actual embedded sample glyphs.
+Device text/render qualification remains deferred.

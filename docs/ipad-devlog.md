@@ -418,3 +418,52 @@ does not release dependent cards or qualify hardware. The prior iOS checks and
 production rebuild cover unchanged shipping source; this arc adds a test and
 progress records. The independent T12 font-input and T13 clipboard/keyboard
 architecture decisions remain available for further work.
+
+
+## 2026-10-17: T12 pinned embedded font inputs
+
+D12 resolves the missing Latin-manifest input decision by selecting the seven
+unchanged files in craft-fonts revision 3d9ab3a132ed0eff457e424226a435a901da30d3.
+The external checkout contains no Inter. iOS reads its primary manifest and
+prefers BIZ UDPGothic for missing document fonts while retaining requested font
+names. Substitute metrics can change line wrapping. Desktop/web keep their
+existing manifest/default-font policy. Native font scans now exclude desktop
+directories, and CJK language availability requires actual embedded sample glyphs.
+
+The new ipad-fonts task checks the revision, manifest, font hashes and OFL text
+hashes from maintenance/ipad-fonts.json. Native packaging validates an available
+profile, requires inputs for Release or an explicit required-font build, and
+bundles the verified licenses and profile. Optional development builds without
+fonts still link and display an unavailable-document-font message. Rebuilding
+without fonts clears the previous profile's bundle metadata. Font bytes remain
+in the external repository. No dependency version or native interop changed.
+
+A direct font probe passed all declared samples, but document layout initially
+failed for Thai because its existing fallback list omitted Noto Sans Thai. Adding
+that family repairs the layout regression and also supplies Thai UI glyphs.
+With system fonts disabled, all 69 text tests and 568 UI tests pass, with one UI
+ignore. Validator tests reject changed bytes, missing license text, unreviewed
+licenses and wrong revisions. Required/release absent-input checks fail explicitly.
+Both iOS target checks and simulator builds with/without the profile pass. The
+linked required-font executable contains all seven exact font payloads, and the
+bundle contains six OFL files, attribution and matching metadata.
+
+The T01 same-font recipe preserves its semantic checks and requests BIZ UDPGothic
+for every text node. The simulator imported the resulting archive through the
+production picker and exported the page to Files. Its 360 by 360 PNG is byte-identical
+to the desktop export (SHA-256 e3f5a20bc1a4c7ade55d37ab45fb56a8ad4921c9940bbe835630ba63e2b67b39).
+The source app's Documents folder is not exposed by file sharing; the existing
+synthetic picker probe's visible folder supplied this local fixture. No app
+file-sharing setting changed. This comparison qualifies the recorded simulator
+fixture only; physical font/render checks remain deferred.
+
+An initial full UI profile run passed its library tests but failed doctests while
+another Cargo process rebuilt the same host directory with different font inputs.
+The serial rerun passes library and doctests. Both logs remain as evidence; no
+source workaround or test relaxation was added.
+
+Full CI passes 2,505 tests with zero failures and nine ignored, including the new
+manual same-font export recipe. T12 enters review pending the deferred physical
+font/render comparison; no dependent card is released. The full port remains
+incomplete, and T13's modifier/clipboard architecture is the next independent
+work.

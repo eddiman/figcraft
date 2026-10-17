@@ -41,3 +41,19 @@ for fixture in manifest['existing_archives']:
 print('PASS: 3 archive paths, sizes and hashes')
 PY
 ```
+
+
+T12's same-font comparison reuses the 50-layer T01 recipe and sets every text
+node's requested family to BIZ UDPGothic. It preserves the synthetic text and
+semantic checks, writes `t01-biz-udpgothic.figcraft`, and exports a desktop PNG.
+Use the pinned external profile from `maintenance/ipad-fonts.json` and disable
+system fonts; the same archive remains an input for native/device comparison.
+
+```sh
+CRAFT_FONTS_DIR=/absolute/path/to/craft-fonts FIGCRAFT_EMBED_CJK=1 \
+FIGCRAFT_NO_SYSTEM_FONTS=1 FIGCRAFT_IPAD_FIXTURE_DIR=/tmp/figcraft-t12 \
+cargo test --locked -p figcraft-engine ipad_fixture_export_same_font_text -- --ignored --nocapture
+```
+
+This recipe creates comparison artifacts. A passing export does not establish
+cross-device font metrics or raster parity.

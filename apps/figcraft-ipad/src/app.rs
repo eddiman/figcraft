@@ -44,6 +44,9 @@ impl eframe::App for Shell {
         ui.painter().rect_filled(ui.max_rect(), 0.0, ui.visuals().panel_fill);
         ui.add_space(ui.input(|i| i.safe_area_insets().0.top).max(32.0));
         ui.label("Open imports a copy. Export creates a copy in Files.");
+        if figcraft_text::CRAFT_FONTS.is_empty() {
+            ui.label("Document fonts are unavailable in this development build.");
+        }
         ui.separator();
         let mut move_fixture = false;
         if self.smoke {

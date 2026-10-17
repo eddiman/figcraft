@@ -120,3 +120,28 @@ fn ipad_fixture_export_large_and_effects() {
         std::fs::write(out.join(format!("{name}.figcraft")), bytes).unwrap();
     }
 }
+
+/// T12 compares this same explicit font on desktop and native, with system fonts disabled.
+#[test]
+#[ignore = "writes T01 same-font archive and PNG to FIGCRAFT_IPAD_FIXTURE_DIR"]
+fn ipad_fixture_export_same_font_text() {
+    let out = std::path::PathBuf::from(std::env::var_os("FIGCRAFT_IPAD_FIXTURE_DIR").expect("set FIGCRAFT_IPAD_FIXTURE_DIR"));
+    std::fs::create_dir_all(&out).unwrap();
+    assert!(figcraft_text::CRAFT_FONTS.iter().any(|font| font.family == "BIZ UDPGothic" && font.style == "Regular"));
+    let mut doc = fixture(50);
+    let ids: Vec<_> = doc.nodes().filter(|node| matches!(node.kind, NodeKind::Text(_))).map(|node| node.id).collect();
+    assert!(!ids.is_empty());
+    for id in ids {
+        if let NodeKind::Text(text) = &mut doc.node_mut(id).unwrap().kind {
+            text.style.font_family = "BIZ UDPGothic".into();
+        }
+    }
+    let bytes = figcraft_format::save_bytes(&doc, None).unwrap();
+    let (loaded, issues) = figcraft_format::load_bytes(&bytes).unwrap();
+    assert!(issues.is_empty(), "{issues:?}");
+    assert_semantics(&doc, &loaded);
+    std::fs::write(out.join("t01-biz-udpgothic.figcraft"), bytes).unwrap();
+    let mut session = crate::Session::with_document(loaded);
+    session.execute("file.export", &serde_json::json!({"format":"png", "path":out.join("t01-biz-udpgothic-desktop.png")})).unwrap();
+    assert!(out.join("t01-biz-udpgothic-desktop.png").metadata().unwrap().len() > 0);
+}
