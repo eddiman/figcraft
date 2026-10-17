@@ -104,6 +104,7 @@ pub struct Normalizer {
     physical_primary: bool,
     panel_pointer: Option<(ContactId, Pos2)>,
     physical_buttons: u8,
+    pending_panel_cancel: bool,
     modifiers: Modifiers,
     frame: u64,
     time: Option<f64>,
@@ -122,6 +123,10 @@ fn primary(e: &Event, down: bool, position: Pos2) -> bool {
     matches!(e,Event::PointerButton{button:PointerButton::Primary,pressed,pos,..} if *pressed==down && same_position(*pos, position))
 }
 impl Normalizer {
+    pub(crate) fn abort_frame(&mut self) {
+        self.suppress_canvas();
+        self.pending_panel_cancel |= self.panel_pointer.is_some();
+    }
     /// Release only our panel pointer, before an independent physical event.
     /// The moves invalidate egui's potential click before the control Up.
     pub(crate) fn cancel_panel(&mut self, output: &mut Vec<Event>, result: &mut Frame, ordinal: usize) {
@@ -232,6 +237,9 @@ impl Normalizer {
         let mut lost_focus = !raw.focused;
         let original = std::mem::take(&mut raw.events);
         let mut output = Vec::with_capacity(original.len());
+        if routing == Routing::CanvasConsumer && std::mem::take(&mut self.pending_panel_cancel) {
+            self.cancel_panel(&mut output, &mut result, 0);
+        }
         let mut i = 0;
         while let Some(event) = original.get(i) {
             if original.len() > MAX_ITEMS && !result.issues.contains(&Issue::Capacity) {

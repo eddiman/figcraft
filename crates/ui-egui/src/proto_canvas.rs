@@ -305,6 +305,23 @@ mod pointer_cancel_tests {
     use super::*;
     use crate::canvas_pointer::tests::{cancel_and_release, preview_fixture};
     #[test]
+    fn ipad_ui_panic_clears_unenrolled_prototype_owner_before_recovery() {
+        struct Probe(egui::Context, std::rc::Rc<std::cell::Cell<bool>>);
+        impl crate::Services for Probe {
+            fn emergency_save(&mut self, _: &figcraft_engine::Session) {
+                assert!(self.0.data(|data| data.get_temp::<Drag>(drag_id())).is_none());
+                self.1.set(true);
+            }
+        }
+        let (mut app, ctx, id) = preview_fixture();
+        assert!(app.canvas_pointer.is_none());
+        ctx.data_mut(|data| data.insert_temp(drag_id(), Drag { source: id, from: Pos2::ZERO, pos: pos2(400.0, 300.0) }));
+        let saved = std::rc::Rc::new(std::cell::Cell::new(false));
+        app.services = Box::new(Probe(ctx.clone(), saved.clone()));
+        assert!(!crate::windows::guard(&mut app, &ctx, |_| panic!("synthetic panic with an unenrolled prototype owner")));
+        assert!(saved.get());
+    }
+    #[test]
     fn ipad_ui_pointer_prototype_owner_cannot_add_connection_after_reset_up() {
         let (mut a, ctx, id) = preview_fixture();
         a.ui.right_tab = RightTab::Prototype;
@@ -354,7 +371,7 @@ mod value_input_tests {
         let (_, from) = handles(&u.app, &before, &selection).first().copied().unwrap();
         let mut native = crate::touch_native::Native::default();
         crate::touch_native::Native::enable(&mut u.app);
-        native.complete_frame(&u.app, &u.ctx);
+        native.finish_frame(&u.app, &u.ctx, true);
         u.app.begin_canvas_pointer(&u.ctx).unwrap();
         crate::canvas::pointer_value(&mut u.app, &u.ctx, PointerKind::Down, from, egui::Modifiers::NONE, None).unwrap();
         assert!(u.ctx.data(|data| data.get_temp::<Drag>(drag_id())).is_some());

@@ -270,3 +270,40 @@ Full CI passes 2,448 tests with eight ignored. Both iOS target checks and
 simulator linking pass. The linked simulator build renders the synthetic editor
 and accepts P16 in its startup field. The native shell still observes input only. The remaining T16 matrix, guarded
 frame completion and native activation remain open; hardware testing is deferred.
+
+
+## 2026-10-17: T16 UI panic cancellation and frame completion
+
+Two Native regressions reproduced a provisional drawing entering emergency
+recovery after a UI panic and a pending finger creating a shape after the panic.
+The window guard now cancels the enrolled pointer and clears current-context
+owners before recovery capture. Cancellation advances the existing interruption
+generation even when pending intent has no engine token. The guard returns true
+only after its callback completes normally.
+
+Native finish_frame takes the completion result and publishes a layout only on
+success. An aborted pass discards the old map and suppresses held intent while
+preserving producer identities and physical button state. abort_frame also works
+without app access: it queues the existing cancellation notice and defers a
+selected panel pointer's reset until the next actual raw hook. Generated reset
+controls remain outside the physical event samples. The unavailable raw hook
+reuses this cleanup before draining the same producer.
+
+Regressions inspect the document inside Services::emergency_save, then check late
+finger/mouse release and pending intent. Other cases abort after canvas drawing,
+require a fresh completed map and a new Start before editing, keep a held mouse
+suppressed until release, cancel panel clicks on the next raw hook, preserve
+producer counters/source indices and remove an unenrolled prototype drag owner
+before recovery capture. Shell remains Observe pending the remaining Native tool
+matrix and activation checks. Hardware qualification remains deferred.
+
+
+The final UI package run passes 524 tests with one ignored. Both iOS target checks
+and simulator linking pass. The rebuilt Observe-mode simulator rendered the
+recovered synthetic editor and accepted R16 (three characters) in its startup
+field. The first full CI attempt stopped on the existing plugin-panel idle
+repaint test. That test passed in the final package suite and in five isolated
+repeats; its source, idle harness and autosave code are unchanged. The initial
+failure remains recorded, and no test assertion or timing threshold was relaxed.
+
+The repeat full CI passes 2,456 tests with zero failures and eight ignored.

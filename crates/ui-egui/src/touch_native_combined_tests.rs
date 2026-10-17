@@ -21,7 +21,7 @@ impl Host {
         session.execute("tool.rectangle", &json!({})).unwrap();
         let ui = Ui::new(session);
         let mut native = Native::default();
-        native.complete_frame(&ui.app, &ui.ctx);
+        native.finish_frame(&ui.app, &ui.ctx, true);
         let pointer = ui.app.canvas.rect.center();
         Self {
             ui,
@@ -67,7 +67,7 @@ impl Host {
                 app.ui(ui);
             })
             .drop_without_applying_deltas();
-        self.native.complete_frame(&self.ui.app, &self.ui.ctx);
+        self.native.finish_frame(&self.ui.app, &self.ui.ctx, true);
     }
     pub(super) fn start(&mut self) {
         let p = self.pointer;
@@ -665,4 +665,144 @@ fn ipad_native_combined_unsupported_physical_metadata_releases_panel_pointer() {
         assert!(!h.ui.ctx.input(|i| i.pointer.primary_down()));
         assert!(!h.clicked);
     }
+}
+
+struct PanicRecoveryProbe {
+    expected: Arc<figcraft_doc::Document>,
+    saves: std::rc::Rc<std::cell::Cell<usize>>,
+}
+impl crate::Services for PanicRecoveryProbe {
+    fn emergency_save(&mut self, session: &Session) {
+        self.saves.set(self.saves.get() + 1);
+        assert!(Arc::ptr_eq(&self.expected, &session.ds().unwrap().doc), "recovery must capture the pre-Down document");
+        assert!(session.ds().unwrap().interaction.is_none(), "recovery must not capture the provisional interaction");
+    }
+}
+
+#[test]
+fn ipad_native_ui_panic_restores_preview_before_emergency_recovery_capture() {
+    for physical in [false, true] {
+        let mut h = Host::new();
+        let before = h.ui.app.session.ds().unwrap().doc.clone();
+        let undo = h.ui.app.session.ds().unwrap().history.undo.len();
+        let saves = std::rc::Rc::new(std::cell::Cell::new(0));
+        h.ui.app.services = Box::new(PanicRecoveryProbe { expected: before.clone(), saves: saves.clone() });
+        let p = h.pointer;
+        if physical {
+            h.run(vec![Event::PointerMoved(p), button(p, true), Event::PointerMoved(p + vec2(50.0, 40.0))]);
+        } else {
+            h.start();
+            h.moved(p + vec2(50.0, 40.0));
+        }
+        assert!(h.ui.app.canvas_pointer.is_some());
+        assert!(!Arc::ptr_eq(&before, &h.ui.app.session.ds().unwrap().doc));
+        crate::windows::guard(&mut h.ui.app, &h.ui.ctx, |_| panic!("synthetic UI panic after Native preview"));
+        assert_eq!(saves.get(), 1);
+        assert!(h.ui.app.canvas_pointer.is_none());
+        if physical {
+            h.run(vec![button(p + vec2(50.0, 40.0), false)]);
+        } else {
+            h.end();
+        }
+        assert!(Arc::ptr_eq(&before, &h.ui.app.session.ds().unwrap().doc));
+        assert_eq!(h.ui.app.session.ds().unwrap().history.undo.len(), undo);
+    }
+}
+
+#[test]
+fn ipad_native_ui_panic_interrupts_pending_contact_without_engine_token() {
+    let mut h = Host::new();
+    let before = h.ui.app.session.ds().unwrap().doc.clone();
+    h.start();
+    assert_eq!(h.native.phase(), Phase::PendingFinger);
+    assert!(h.ui.app.canvas_pointer.is_none());
+    crate::windows::guard(&mut h.ui.app, &h.ui.ctx, |_| panic!("synthetic UI panic while Native intent is pending"));
+    h.moved(h.pointer + vec2(50.0, 40.0));
+    h.end();
+    assert!(Arc::ptr_eq(&before, &h.ui.app.session.ds().unwrap().doc));
+    assert!(h.ui.app.canvas_pointer.is_none());
+}
+
+fn guarded_native_frame(h: &mut Host, fail_after_drawing: bool) -> bool {
+    h.time += 0.05;
+    let mut raw =
+        RawInput { time: Some(h.time), screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0))), ..Default::default() };
+    assert!(h.native.process(&mut h.ui.app, &h.ui.ctx, &mut raw).issues.is_empty());
+    let ctx = h.ui.ctx.clone();
+    let mut completed = false;
+    h.ui.ctx
+        .run_ui(raw, |ui| {
+            completed = crate::windows::guard(&mut h.ui.app, &ctx, |app| {
+                app.ui(ui);
+                assert!(!fail_after_drawing, "synthetic UI panic after canvas drawing");
+            });
+        })
+        .drop_without_applying_deltas();
+    h.native.finish_frame(&h.ui.app, &h.ui.ctx, completed);
+    completed
+}
+
+#[test]
+fn ipad_native_aborted_ui_frame_discards_partial_layout_and_requires_new_canvas_start() {
+    let mut h = Host::new();
+    let before = h.ui.app.session.ds().unwrap().doc.clone();
+    let count = before.nodes().count();
+    let old_owner = h.native.consumer.layout.as_ref().unwrap().target.owner();
+    assert!(!guarded_native_frame(&mut h, true));
+    assert!(h.native.consumer.layout.is_none());
+    // This Start occurs before a new completed layout, so it cannot edit even
+    // after drawing resumes and publishes a different layout generation.
+    h.start();
+    assert_ne!(h.native.consumer.layout.as_ref().unwrap().target.owner(), old_owner);
+    h.moved(h.pointer + vec2(50.0, 40.0));
+    h.end();
+    assert!(Arc::ptr_eq(&before, &h.ui.app.session.ds().unwrap().doc));
+    assert!(guarded_native_frame(&mut h, false));
+    assert!(h.native.consumer.layout.is_some());
+    h.start();
+    h.moved(h.pointer + vec2(50.0, 40.0));
+    h.end();
+    assert_eq!(h.ui.app.session.doc().unwrap().nodes().count(), count + 1);
+}
+
+#[test]
+fn ipad_native_aborted_ui_frame_keeps_held_physical_mouse_suppressed_until_release() {
+    let mut h = Host::new();
+    let before = h.ui.app.session.ds().unwrap().doc.clone();
+    let p = h.pointer;
+    h.run(vec![button(p, true), Event::PointerMoved(p + vec2(50.0, 40.0))]);
+    assert!(h.ui.app.canvas_pointer.is_some());
+    assert!(!guarded_native_frame(&mut h, true));
+    assert!(h.ui.app.canvas_pointer.is_none());
+    assert!(h.native.consumer.mouse.any_down());
+    assert!(Arc::ptr_eq(&before, &h.ui.app.session.ds().unwrap().doc));
+    assert!(guarded_native_frame(&mut h, false));
+    h.run(vec![Event::PointerMoved(p + vec2(90.0, 70.0))]);
+    assert!(h.ui.app.canvas_pointer.is_none());
+    h.run(vec![button(p + vec2(90.0, 70.0), false)]);
+    assert!(Arc::ptr_eq(&before, &h.ui.app.session.ds().unwrap().doc));
+    let count = before.nodes().count();
+    h.run(vec![button(p, true), Event::PointerMoved(p + vec2(50.0, 40.0)), button(p + vec2(50.0, 40.0), false)]);
+    assert_eq!(h.ui.app.session.doc().unwrap().nodes().count(), count + 1);
+}
+
+#[test]
+fn ipad_native_abort_without_app_access_resets_panel_click_on_next_actual_hook() {
+    let mut h = Host::new();
+    h.show_field = true;
+    h.run(vec![]);
+    h.run(vec![]);
+    let panel = h.cancelled_button_rect.unwrap().center();
+    h.run(vec![touch(1, TouchPhase::Start, panel), Event::PointerMoved(panel), button(panel, true)]);
+    assert!(h.ui.ctx.input(|i| i.pointer.primary_down()));
+    h.native.abort_frame(&h.ui.ctx);
+    assert!(h.native.consumer.layout.is_none());
+    // Abort has no RawInput to process. The next genuine release carries the
+    // cancellation controls without resetting backend suffix provenance.
+    h.run(vec![touch(1, TouchPhase::End, panel), button(panel, false), Event::PointerGone]);
+    assert!(!h.clicked);
+    assert!(!h.ui.ctx.input(|i| i.pointer.primary_down()));
+    h.run(vec![touch(2, TouchPhase::Start, panel), Event::PointerMoved(panel), button(panel, true)]);
+    h.run(vec![touch(2, TouchPhase::End, panel), button(panel, false), Event::PointerGone]);
+    assert!(h.clicked);
 }

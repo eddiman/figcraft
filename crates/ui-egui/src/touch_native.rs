@@ -217,20 +217,29 @@ impl Native {
         app.canvas.native_hover = None;
         app.canvas.native_position = None;
     }
-    /// No engine operation can run while the app is borrowed elsewhere. Queue
-    /// rollback and drain source state before egui aggregates a reset/release.
-    pub fn unavailable(&mut self, ctx: &Context, raw: &mut egui::RawInput) -> crate::touch_events::Frame {
+    /// No completed editor layout is available. Suppress held intent without
+    /// resetting producer identity or inventing another raw input frame.
+    pub fn abort_frame(&mut self, ctx: &Context) {
         FigApp::request_canvas_pointer_cancel(ctx);
         crate::handles::cancel_pointer(ctx);
         crate::guides::cancel_pointer(ctx);
         crate::proto_canvas::cancel_pointer(ctx);
         ctx.stop_dragging();
-        let layout = self.consumer.layout.clone();
-        let mut frame = self.boundary.unavailable(raw, |position| layout.as_ref().map_or(Owner::Panel, |layout| layout.classify(ctx, position)));
-        // Interrupt retains unknown/held identities. Only explicit producer
-        // focus reset may recover a recognizer blocked by malformed input.
+        self.boundary.abort_frame();
         self.consumer.finger.gesture.interrupt();
         self.consumer.finger.navigation = None;
+        self.consumer.mouse.abandon(self.consumer.mouse.any_down());
+        self.consumer.frame = None;
+        self.consumer.layout = None;
+    }
+    /// No engine operation can run while the app is borrowed elsewhere. Queue
+    /// rollback and drain source state before egui aggregates a reset/release.
+    pub fn unavailable(&mut self, ctx: &Context, raw: &mut egui::RawInput) -> crate::touch_events::Frame {
+        let layout = self.consumer.layout.clone();
+        self.abort_frame(ctx);
+        let mut frame = self.boundary.unavailable(raw, |position| layout.as_ref().map_or(Owner::Panel, |layout| layout.classify(ctx, position)));
+        // Abort retained unknown/held identities. Only explicit producer
+        // focus reset may recover a recognizer blocked by malformed input.
         for item in &frame.items {
             if let crate::touch_events::Item::Contact(contact) = item {
                 self.consumer.finger.gesture.event(contact, Policy::Drag);
@@ -258,8 +267,13 @@ impl Native {
         self.consumer.layout = None;
         frame
     }
-    /// Capture only after FigApp has completed drawing this window.
-    pub fn complete_frame(&mut self, app: &FigApp, ctx: &Context) {
+    /// Pass the guard's completion result. A caught panic cannot publish any
+    /// layout, including a canvas drawn before a later panel failed.
+    pub fn finish_frame(&mut self, app: &FigApp, ctx: &Context, completed: bool) {
+        if !completed {
+            self.abort_frame(ctx);
+            return;
+        }
         if !self.initialized {
             self.generation = Some(0);
             self.initialized = true;

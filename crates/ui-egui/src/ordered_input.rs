@@ -136,6 +136,12 @@ pub struct Boundary {
     last_interruption: Option<u64>,
 }
 impl Boundary {
+    pub(crate) fn abort_frame(&mut self) {
+        self.normalizer.abort_frame();
+        for suppressed in self.held.values_mut() {
+            *suppressed = true;
+        }
+    }
     /// Drain the producer while FigApp cannot be borrowed. Held canvas contacts
     /// stay suppressed; panel values remain available to egui. No edit runs.
     pub(crate) fn unavailable(&mut self, raw: &mut RawInput, classify: impl Fn(egui::Pos2) -> Owner) -> Frame {

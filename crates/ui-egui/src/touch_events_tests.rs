@@ -418,3 +418,32 @@ fn ipad_touch_panel_pointer_is_released_on_focus_loss_or_invalid_clock() {
         assert!(!ctx.input(|i| i.pointer.primary_down()));
     }
 }
+
+#[test]
+fn ipad_touch_aborted_frame_defers_one_panel_reset_without_advancing_producer() {
+    let mut n = Normalizer::default();
+    let p = pos2(10.0, 20.0);
+    let mut input = raw(start(1, 1, p), 1.0);
+    n.process(&mut input, Routing::CanvasConsumer, |_| Owner::Panel);
+    let frame = n.frame;
+    n.abort_frame();
+    n.abort_frame();
+    assert_eq!(n.frame, frame);
+    assert_eq!(n.backend_primary, Some(1));
+    assert_eq!(n.contacts.len(), 1);
+    let mut input = raw(vec![touch(1, 1, TouchPhase::End, p), button(false, p), Event::PointerGone, button(true, p)], 2.0);
+    let frame = n.process(&mut input, Routing::CanvasConsumer, |_| Owner::Panel);
+    assert!(frame.issues.is_empty());
+    assert!(matches!(frame.items[0], Item::PanelCancelled { ordinal: 0 }));
+    assert_eq!(input.events.iter().filter(|e| matches!(e, Event::PointerButton { pressed: false, .. })).count(), 1);
+    let physical: Vec<_> = frame
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Input { index, .. } => Some(input.events[*index].clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(physical, vec![button(true, p)]);
+    assert!(frame.physical_primary_down);
+}

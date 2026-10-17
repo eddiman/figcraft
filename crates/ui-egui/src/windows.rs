@@ -90,15 +90,22 @@ pub fn with_app<R>(f: impl FnOnce(&mut FigApp) -> R) -> Option<R> {
 
 /// Last-resort guard around a frame: a panic becomes a message and recovery copies of unsaved
 /// files, not a lost document.
-pub fn guard(app: &mut FigApp, ctx: &Context, f: impl FnOnce(&mut FigApp)) {
+/// Returns true only when the callback completed, so hosts cannot publish a partial layout.
+pub fn guard(app: &mut FigApp, ctx: &Context, f: impl FnOnce(&mut FigApp)) -> bool {
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(&mut *app)));
     if let Err(e) = res {
+        // Recovery must not capture a provisional pointer preview. Advancing
+        // the interruption also cancels pending intent that has no token yet.
+        app.cancel_canvas_pointer();
+        app.cancel_pointer_owners(ctx);
         let msg = e.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| e.downcast_ref::<String>().cloned()).unwrap_or_else(|| "panic".into());
         log::error!("UI panic: {msg}");
         app.toast(format!("Internal error (please report): {msg}"));
         ctx.request_repaint();
         app.services.emergency_save(&app.session);
+        return false;
     }
+    true
 }
 
 /// Control-channel input events (`ui.input`) for the window `viewport` draws next.
