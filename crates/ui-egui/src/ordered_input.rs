@@ -136,12 +136,31 @@ pub struct Boundary {
     last_interruption: Option<u64>,
 }
 impl Boundary {
+    /// Drain the producer while FigApp cannot be borrowed. Held canvas contacts
+    /// stay suppressed; panel values remain available to egui. No edit runs.
+    pub(crate) fn unavailable(&mut self, raw: &mut RawInput, classify: impl Fn(egui::Pos2) -> Owner) -> Frame {
+        self.normalizer.suppress_canvas();
+        for suppressed in self.held.values_mut() {
+            *suppressed = true;
+        }
+        self.normalizer.process(raw, Routing::CanvasConsumer, |position| match classify(position) {
+            Owner::Canvas { .. } => Owner::Suppressed,
+            owner => owner,
+        })
+    }
     fn interrupt(&mut self, app: &mut FigApp, ctx: &Context, consumer: &mut impl CanvasConsumer, why: Interruption) {
         app.cancel_canvas_pointer();
         for suppressed in self.held.values_mut() {
             *suppressed = true;
         }
         consumer.interrupt(app, ctx, why);
+    }
+
+    fn flush_requested_cancel(&mut self, app: &mut FigApp, ctx: &Context, consumer: &mut impl CanvasConsumer) {
+        if FigApp::canvas_pointer_cancel_requested(ctx) {
+            app.canvas_pointer_preflight(ctx);
+            self.interrupt(app, ctx, consumer, Interruption::SourceOrLayout);
+        }
     }
 
     /// Call in raw_input_hook, before egui aggregates pointer state. `target` and
@@ -158,9 +177,9 @@ impl Boundary {
     ) -> Frame {
         let physical_held = self.normalizer.physical_primary_down();
         let mut frame = self.normalizer.process(raw, Routing::CanvasConsumer, &classify);
-        let interrupted_between_frames = self.last_interruption.is_some() && self.last_interruption != app.canvas_interruption;
         let had_owner = app.canvas_pointer.is_some();
         app.canvas_pointer_preflight(ctx);
+        let interrupted_between_frames = self.last_interruption.is_some() && self.last_interruption != app.canvas_interruption;
         let valid = target.is_some_and(|t| t.current(app, ctx, raw));
         let routes_physical = consumer.routes_physical();
         let mut forwarded = !valid || (physical_held && !routes_physical) || !raw.dropped_files.is_empty();
@@ -208,6 +227,7 @@ impl Boundary {
         }
         let now = frame.timestamp.map_or(0.0, |(time, _, _)| time);
         for item in &frame.items {
+            self.flush_requested_cancel(app, ctx, consumer);
             match item {
                 Item::Contact(contact) => {
                     if contact.owner == Owner::Panel {
@@ -301,19 +321,20 @@ impl Boundary {
             }
         }
         keyboard.finish(app, ctx);
-        self.normalizer.suppress_contacts(self.held.iter().filter_map(|(id, suppressed)| suppressed.then_some(*id)));
         let mut index = 0;
         raw.events.retain(|_| {
             let keep = !consumed.contains(&index);
             index += 1;
             keep
         });
+        self.flush_requested_cancel(app, ctx, consumer);
         if !raw.focused || raw.events.iter().any(|event| matches!(event, Event::WindowFocused(false))) {
             self.held.clear();
             consumer.producer_reset(app, ctx);
         } else {
             consumer.finish_frame(app, ctx, frame.timestamp);
         }
+        self.normalizer.suppress_contacts(self.held.iter().filter_map(|(id, suppressed)| suppressed.then_some(*id)));
         self.last_interruption = app.canvas_interruption;
         frame
     }

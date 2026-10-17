@@ -406,3 +406,77 @@ fn ipad_ordered_old_frame_output_does_not_lose_the_current_ime_caret() {
     let output = u.frame_output(input.events);
     assert!(output.platform_output.ime.is_some(), "the rendered frame must report the current IME caret");
 }
+
+struct QueuedFinger {
+    finger: crate::touch_native::Finger,
+    on_start: bool,
+    on_second_prepare: bool,
+    frames: usize,
+}
+impl CanvasConsumer for QueuedFinger {
+    fn routes_physical(&self) -> bool {
+        false
+    }
+    fn physical_held(&self) -> bool {
+        false
+    }
+    fn begin_frame(&mut self, app: &mut FigApp, ctx: &Context, raw: &RawInput, frame: &Frame, current: bool) -> Result<bool, String> {
+        self.frames += 1;
+        let result = self.finger.begin_frame(app, ctx, raw, frame, current);
+        if self.on_second_prepare && self.frames == 2 {
+            FigApp::request_canvas_pointer_cancel(ctx);
+        }
+        result
+    }
+    fn physical_input(&mut self, _: &mut FigApp, _: &Context, _: PhysicalInput<'_>) -> bool {
+        false
+    }
+    fn contact(&mut self, app: &mut FigApp, ctx: &Context, contact: &Contact) {
+        self.finger.contact(app, ctx, contact);
+        if self.on_start && contact.phase == TouchPhase::Start {
+            FigApp::request_canvas_pointer_cancel(ctx);
+        }
+    }
+    fn interrupt(&mut self, app: &mut FigApp, ctx: &Context, why: Interruption) {
+        self.finger.interrupt(app, ctx, why);
+    }
+    fn producer_reset(&mut self, app: &mut FigApp, ctx: &Context) {
+        self.finger.producer_reset(app, ctx);
+    }
+    fn finish_frame(&mut self, app: &mut FigApp, ctx: &Context, time: Option<(f64, Clock, u64)>) {
+        self.finger.finish_frame(app, ctx, time);
+    }
+}
+#[test]
+fn ipad_ordered_queue_between_pending_start_and_move_cannot_emit_down() {
+    let mut session = Session::new();
+    session.execute("tool.rectangle", &json!({})).unwrap();
+    let mut u = Ui::new(session);
+    let target = Target::capture(&u.app, &u.ctx, 1).unwrap();
+    let p = u.app.canvas.rect.center();
+    let before = u.app.session.ds().unwrap().doc.clone();
+    let mut consumer = QueuedFinger { finger: Default::default(), on_start: true, on_second_prepare: false, frames: 0 };
+    let mut boundary = Boundary::default();
+    let mut events = start(1, p);
+    events.extend([touch(1, TouchPhase::Move, p + egui::vec2(50.0, 40.0)), Event::PointerMoved(p + egui::vec2(50.0, 40.0))]);
+    let mut input = raw(events, 1.0);
+    assert!(boundary.process(&mut u.app, &u.ctx, &mut input, Some(&target), |_| target.owner(), &mut consumer).issues.is_empty());
+    assert!(std::sync::Arc::ptr_eq(&before, &u.app.session.ds().unwrap().doc));
+    assert!(u.app.canvas_pointer.is_none());
+    assert_eq!(consumer.finger.phase(), crate::touch::Phase::SuppressedUntilAllReleased);
+}
+#[test]
+fn ipad_ordered_queue_during_prepare_prevents_a_due_long_press() {
+    let mut u = Ui::new(Session::new());
+    let target = Target::capture(&u.app, &u.ctx, 1).unwrap();
+    let p = u.app.canvas.rect.center();
+    let mut consumer = QueuedFinger { finger: Default::default(), on_start: false, on_second_prepare: true, frames: 0 };
+    let mut boundary = Boundary::default();
+    let mut input = raw(start(1, p), 1.0);
+    assert!(boundary.process(&mut u.app, &u.ctx, &mut input, Some(&target), |_| target.owner(), &mut consumer).issues.is_empty());
+    let mut input = raw(vec![], 1.6);
+    assert!(boundary.process(&mut u.app, &u.ctx, &mut input, Some(&target), |_| target.owner(), &mut consumer).issues.is_empty());
+    assert!(u.app.ui.context_menu.is_none(), "cancel queued during preparation precedes the due timer");
+    assert_eq!(consumer.finger.phase(), crate::touch::Phase::SuppressedUntilAllReleased);
+    assert!(u.app.canvas_pointer.is_none());
+}

@@ -41,6 +41,7 @@ pub struct Navigation {
 }
 #[derive(Default)]
 pub struct PhysicalFrame {
+    pub any_down: bool,
     pub position: Option<Pos2>,
     pub samples: Vec<Sample>,
     pub navigation: Option<Navigation>,
@@ -217,9 +218,10 @@ impl Physical {
             modifiers: next.modifiers,
         });
         let position = next.pointer.hover_pos();
+        let any_down = next.pointer.any_down();
         self.state = next;
         self.frame = Some(number);
-        Ok(PhysicalFrame { position, samples, navigation, reset: false })
+        Ok(PhysicalFrame { any_down, position, samples, navigation, reset: false })
     }
 }
 
@@ -253,6 +255,12 @@ fn disabled(message: &str) -> figcraft_engine::EngineError {
     figcraft_engine::EngineError::Disabled("pointer.mouse".into(), message.into())
 }
 impl Mouse {
+    /// The app cannot be borrowed to cancel immediately. Discard local editing
+    /// intent; queued preflight will restore the engine before its next handler.
+    pub(crate) fn abandon(&mut self, any_down: bool) {
+        self.any_down = any_down;
+        self.state = if any_down { State::Suppressed } else { State::Idle };
+    }
     pub fn any_down(&self) -> bool {
         self.any_down
     }

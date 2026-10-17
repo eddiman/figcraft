@@ -201,3 +201,41 @@ route. This keeps home/modal controls operational while the native canvas gate
 prevents edits and fixed ownership prevents a held contact from transferring
 when a map appears. Both cases have regression tests.
 T16 and the full port goal remain incomplete; physical qualification is deferred.
+
+
+## 2026-10-17: T16 unavailable-app guard and specialized cancellation cases
+
+Native::enable selects the canvas policy before the host installs FigApp, so a
+first unavailable raw hook cannot fall back to legacy editing. Native::unavailable
+queues the existing rollback, clears context-owned handle/guide/prototype drags
+before a panel reset release, drains the same normalizer and preserves panel
+text. It updates the physical mirror and retains actual held buttons while
+discarding local edit intent. Finger suppression retains unknown identities
+until focus reset. The old canvas map is discarded because the editor did not
+draw; resumption restores the engine before handlers and needs a new map.
+
+Six guard tests exercise actual nested app borrowing, first-hook policy, finger
+End, physical Up, a still-held button, explicit unsupported input and recovery.
+A prototype test also inspects its private owner before the forwarded reset Up.
+The Native matrix now crosses nine causes with prototype connectors, earlier
+Pen anchors, earlier text/preedit, vector bend, vector Bezier handles and comment
+pins. These 54 cases compare the source and destination documents, selection,
+text/preedit, vector sub-selection, undo/redo, view and prior interaction against
+the normal external command outcome on a pre-Down control engine. The fixtures
+centre their synthetic geometry and initialize the destination tab's viewport;
+earlier failures came from off-canvas points and an uninitialized control view.
+
+A final lifecycle regression found that the boundary read its interruption
+counter before preflight consumed a queued cancellation. An old pending contact
+could then emit its first Down. The boundary now compares after preflight and
+flushes queued cancellation before ordered values and before the timer. Tests
+cover an initial pending contact, cancellation queued between Start/Move and a
+queue during preparation before a due long press.
+
+The final full CI passes with 2,439 tests, zero failures and eight ignored
+tests; UI has 507 passes and one ignored test. Both iOS target checks and
+simulator linking pass. The final Observe-mode build renders the synthetic
+editor. Its smoke field displayed L16 with three characters after refocusing.
+T16 remains in progress. Guide, gradient/crop/blur/padding/gap and vector width/region rows,
+completed-frame/panic handling in the host and native activation/runtime evidence
+remain. Shell still uses Observe, and hardware qualification stays deferred.

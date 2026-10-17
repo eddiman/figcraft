@@ -343,4 +343,40 @@ mod value_input_tests {
         u.app.finish_canvas_pointer().unwrap();
         assert!(u.ctx.data(|d| d.get_temp::<Drag>(drag_id())).is_none());
     }
+    #[test]
+    fn ipad_native_unavailable_removes_prototype_before_forwarded_reset_up() {
+        let mut session = Session::new();
+        session.execute("shape.rectangle", &json!({"x":100,"y":100,"width":100,"height":100})).unwrap();
+        let mut u = Ui::new(session);
+        u.app.ui.right_tab = RightTab::Prototype;
+        let before = u.app.session.ds().unwrap().doc.clone();
+        let selection = u.app.session.selection();
+        let (_, from) = handles(&u.app, &before, &selection).first().copied().unwrap();
+        let mut native = crate::touch_native::Native::default();
+        crate::touch_native::Native::enable(&mut u.app);
+        native.complete_frame(&u.app, &u.ctx);
+        u.app.begin_canvas_pointer(&u.ctx).unwrap();
+        crate::canvas::pointer_value(&mut u.app, &u.ctx, PointerKind::Down, from, egui::Modifiers::NONE, None).unwrap();
+        assert!(u.ctx.data(|data| data.get_temp::<Drag>(drag_id())).is_some());
+        let panel = Pos2::ZERO;
+        let button =
+            |pressed| egui::Event::PointerButton { pos: panel, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        let touch = |phase| egui::Event::Touch { device_id: egui::TouchDeviceId(1), id: egui::TouchId(1), phase, pos: panel, force: None };
+        let mut raw = egui::RawInput {
+            time: Some(1.0),
+            events: vec![touch(egui::TouchPhase::Start), egui::Event::PointerMoved(panel), button(true)],
+            ..Default::default()
+        };
+        assert!(native.unavailable(&u.ctx, &mut raw).issues.is_empty());
+        assert!(u.ctx.data(|data| data.get_temp::<Drag>(drag_id())).is_none(), "remove the UI owner before egui sees any reset release");
+        u.ctx.run_ui(raw, |_| {}).drop_without_applying_deltas();
+        let mut raw =
+            egui::RawInput { time: Some(1.1), events: vec![touch(egui::TouchPhase::Cancel), egui::Event::PointerGone], ..Default::default() };
+        assert!(native.unavailable(&u.ctx, &mut raw).issues.is_empty());
+        assert!(raw.events.iter().any(|event| matches!(event, egui::Event::PointerButton { pressed: false, .. })));
+        assert!(u.app.canvas_pointer.is_some(), "engine restoration waits until the editor can be borrowed");
+        u.ctx.run_ui(raw, |ui| u.app.ui(ui)).drop_without_applying_deltas();
+        assert!(u.app.canvas_pointer.is_none());
+        assert!(std::sync::Arc::ptr_eq(&before, &u.app.session.ds().unwrap().doc));
+    }
 }

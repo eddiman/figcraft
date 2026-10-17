@@ -151,6 +151,10 @@ impl FigApp {
         ctx.request_repaint();
     }
 
+    pub(crate) fn canvas_pointer_cancel_requested(ctx: &Context) -> bool {
+        ctx.data(|data| data.get_temp::<bool>(egui::Id::new("canvas_pointer_cancel_requested"))).unwrap_or(false)
+    }
+
     /// Validate source/layout and ownership before logic or any release handler.
     pub fn canvas_pointer_preflight(&mut self, ctx: &Context) {
         let requested = ctx.data_mut(|data| data.remove_temp::<bool>(egui::Id::new("canvas_pointer_cancel_requested"))).unwrap_or(false);

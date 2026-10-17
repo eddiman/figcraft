@@ -4,11 +4,11 @@ use egui::{Event, Modifiers, PointerButton, RawInput, TouchDeviceId, TouchId, To
 use figcraft_engine::Session;
 use serde_json::json;
 use std::sync::Arc;
-struct Host {
-    ui: Ui,
-    native: Native,
-    time: f64,
-    pointer: Pos2,
+pub(super) struct Host {
+    pub(super) ui: Ui,
+    pub(super) native: Native,
+    pub(super) time: f64,
+    pub(super) pointer: Pos2,
     show_field: bool,
     field: String,
     field_rect: Option<egui::Rect>,
@@ -16,7 +16,7 @@ struct Host {
     clicked: bool,
 }
 impl Host {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let mut session = Session::new();
         session.execute("tool.rectangle", &json!({})).unwrap();
         let ui = Ui::new(session);
@@ -35,10 +35,13 @@ impl Host {
             clicked: false,
         }
     }
-    fn run(&mut self, events: Vec<Event>) {
+    pub(super) fn run(&mut self, events: Vec<Event>) {
         self.run_checked(events, &[]);
     }
-    fn run_checked(&mut self, events: Vec<Event>, expected: &[crate::touch_events::Issue]) {
+    pub(super) fn run_checked(&mut self, events: Vec<Event>, expected: &[crate::touch_events::Issue]) {
+        self.run_custom(events, expected, |_| {});
+    }
+    pub(super) fn run_custom(&mut self, events: Vec<Event>, expected: &[crate::touch_events::Issue], configure: impl FnOnce(&mut RawInput)) {
         self.time += 0.05;
         let mut raw = RawInput {
             events,
@@ -46,6 +49,7 @@ impl Host {
             screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0))),
             ..Default::default()
         };
+        configure(&mut raw);
         let frame = self.native.process(&mut self.ui.app, &self.ui.ctx, &mut raw);
         assert_eq!(frame.issues, expected);
         let app = &mut self.ui.app;
@@ -65,15 +69,15 @@ impl Host {
             .drop_without_applying_deltas();
         self.native.complete_frame(&self.ui.app, &self.ui.ctx);
     }
-    fn start(&mut self) {
+    pub(super) fn start(&mut self) {
         let p = self.pointer;
         self.run(vec![touch(1, TouchPhase::Start, p), Event::PointerMoved(p), button(p, true)]);
     }
-    fn moved(&mut self, p: Pos2) {
+    pub(super) fn moved(&mut self, p: Pos2) {
         self.pointer = p;
         self.run(vec![touch(1, TouchPhase::Move, p), Event::PointerMoved(p)]);
     }
-    fn end(&mut self) {
+    pub(super) fn end(&mut self) {
         let p = self.pointer;
         self.run(vec![touch(1, TouchPhase::End, p), button(p, false), Event::PointerGone]);
     }
@@ -394,4 +398,164 @@ fn ipad_native_combined_missing_map_cannot_start_canvas_edit_or_transfer_a_held_
     h.moved(p + vec2(80.0, 80.0));
     h.end();
     assert!(!Arc::ptr_eq(&before, &h.ui.app.session.ds().unwrap().doc));
+}
+
+impl Host {
+    pub(super) fn unavailable(&mut self, events: Vec<Event>) {
+        self.time += 0.05;
+        let mut raw = RawInput {
+            events,
+            time: Some(self.time),
+            screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0))),
+            ..Default::default()
+        };
+        let frame = self.native.unavailable(&self.ui.ctx, &mut raw);
+        assert!(frame.issues.is_empty(), "{:?}", frame.issues);
+        self.ui.ctx.run_ui(raw, |_| {}).drop_without_applying_deltas();
+    }
+}
+#[test]
+fn ipad_native_unavailable_finger_end_queues_rollback_before_editor_resumes() {
+    let mut h = Host::new();
+    let p = h.pointer;
+    let before = h.ui.app.session.ds().unwrap().doc.clone();
+    let undo = h.ui.app.session.ds().unwrap().history.undo.len();
+    h.start();
+    h.moved(p + vec2(50.0, 40.0));
+    assert!(h.ui.app.canvas_pointer.is_some());
+    assert!(!Arc::ptr_eq(&before, &h.ui.app.session.ds().unwrap().doc));
+    h.unavailable(vec![touch(1, TouchPhase::End, h.pointer), button(h.pointer, false), Event::PointerGone]);
+    assert!(h.ui.app.canvas_pointer.is_some(), "unavailable callback cannot borrow the app to restore immediately");
+    assert!(h.native.consumer.layout.is_none());
+    h.run(vec![]);
+    assert!(h.ui.app.canvas_pointer.is_none());
+    assert!(Arc::ptr_eq(&before, &h.ui.app.session.ds().unwrap().doc));
+    assert_eq!(h.ui.app.session.ds().unwrap().history.undo.len(), undo);
+    h.start();
+    h.moved(p + vec2(90.0, 70.0));
+    h.end();
+    assert_eq!(h.ui.app.session.ds().unwrap().history.undo.len(), undo + 1);
+}
+#[test]
+fn ipad_native_unavailable_physical_up_does_not_leave_a_false_held_mouse() {
+    let mut h = Host::new();
+    let p = h.pointer;
+    let before = h.ui.app.session.ds().unwrap().doc.clone();
+    let undo = h.ui.app.session.ds().unwrap().history.undo.len();
+    h.run(vec![button(p, true), Event::PointerMoved(p + vec2(50.0, 40.0))]);
+    h.unavailable(vec![button(p + vec2(50.0, 40.0), false)]);
+    assert!(!h.native.consumer.mouse.any_down());
+    h.run(vec![]);
+    assert!(Arc::ptr_eq(&before, &h.ui.app.session.ds().unwrap().doc));
+    h.start();
+    h.moved(p + vec2(70.0, 70.0));
+    h.end();
+    assert_eq!(h.ui.app.session.ds().unwrap().history.undo.len(), undo + 1);
+}
+#[test]
+fn ipad_native_unavailable_still_held_mouse_cannot_restart_its_edit() {
+    let mut h = Host::new();
+    let p = h.pointer;
+    let before = h.ui.app.session.ds().unwrap().doc.clone();
+    h.run(vec![button(p, true), Event::PointerMoved(p + vec2(40.0, 30.0))]);
+    h.unavailable(vec![Event::PointerMoved(p + vec2(70.0, 60.0))]);
+    assert!(h.native.consumer.mouse.any_down());
+    h.run(vec![]);
+    h.run(vec![Event::PointerMoved(p + vec2(100.0, 90.0)), button(p + vec2(100.0, 90.0), false)]);
+    assert!(Arc::ptr_eq(&before, &h.ui.app.session.ds().unwrap().doc));
+    assert!(h.ui.app.canvas_pointer.is_none());
+}
+#[test]
+fn ipad_native_unavailable_first_hook_cannot_fall_back_to_legacy_canvas() {
+    let mut h = Host::new();
+    h.native = Native::default();
+    Native::enable(&mut h.ui.app);
+    let p = h.pointer;
+    let before = h.ui.app.session.ds().unwrap().doc.clone();
+    let mut raw = RawInput {
+        time: Some(2.0),
+        events: vec![
+            touch(1, TouchPhase::Start, p),
+            Event::PointerMoved(p),
+            button(p, true),
+            touch(1, TouchPhase::End, p),
+            button(p, false),
+            Event::PointerGone,
+        ],
+        ..Default::default()
+    };
+    let frame = h.native.unavailable(&h.ui.ctx, &mut raw);
+    assert!(frame.issues.is_empty());
+    // The temporary borrow can end before ui() in this same pass. Even a raw
+    // panel-owned touch over the canvas must not reach the legacy editor route.
+    let app = &mut h.ui.app;
+    h.ui.ctx.run_ui(raw, |ui| app.ui(ui)).drop_without_applying_deltas();
+    assert!(Arc::ptr_eq(&before, &h.ui.app.session.ds().unwrap().doc));
+    assert!(h.ui.app.canvas_pointer.is_none());
+}
+#[test]
+fn ipad_native_unavailable_actual_nested_app_borrow_takes_the_guard_path() {
+    let mut h = Host::new();
+    let p = h.pointer;
+    let before = h.ui.app.session.ds().unwrap().doc.clone();
+    h.start();
+    h.moved(p + vec2(40.0, 30.0));
+    let ctx = h.ui.ctx.clone();
+    let mut native = h.native;
+    crate::windows::install(h.ui.app);
+    let mut raw = RawInput {
+        time: Some(3.0),
+        events: vec![touch(1, TouchPhase::End, p + vec2(40.0, 30.0)), button(p + vec2(40.0, 30.0), false), Event::PointerGone],
+        ..Default::default()
+    };
+    crate::windows::with_app(|app| {
+        assert!(crate::windows::with_app(|_| ()).is_none(), "nested borrow is unavailable");
+        let frame = native.unavailable(&ctx, &mut raw);
+        assert!(frame.issues.is_empty());
+        assert!(app.canvas_pointer.is_some());
+    })
+    .unwrap();
+    crate::windows::with_app(|app| {
+        ctx.run_ui(raw, |ui| app.ui(ui)).drop_without_applying_deltas();
+        assert!(app.canvas_pointer.is_none());
+        assert!(Arc::ptr_eq(&before, &app.session.ds().unwrap().doc));
+    })
+    .unwrap();
+}
+#[test]
+fn ipad_native_unavailable_bad_input_is_explicit_and_keeps_panel_text() {
+    let mut h = Host::new();
+    let mut raw = RawInput { time: Some(2.0), events: vec![Event::Zoom(f32::NAN), Event::Text("Synthetic panel text".into())], ..Default::default() };
+    let frame = h.native.unavailable(&h.ui.ctx, &mut raw);
+    assert!(frame.blocked && frame.issues.contains(&crate::touch_events::Issue::PhysicalInput));
+    assert!(raw.events.iter().any(|event| matches!(event,Event::Text(text) if text=="Synthetic panel text")));
+    assert!(!raw.events.iter().any(|event| matches!(event,Event::Zoom(value) if !value.is_finite())));
+    h.time = 2.0;
+    h.run_checked(vec![], &[crate::touch_events::Issue::PhysicalInput]);
+    h.unavailable(vec![Event::WindowFocused(false)]);
+    h.run(vec![Event::WindowFocused(true)]);
+    assert!(!h.ui.app.canvas_input_blocked);
+}
+
+#[test]
+fn ipad_native_queued_lifecycle_cancel_suppresses_pending_contact_before_down() {
+    let mut h = Host::new();
+    let p = h.pointer;
+    let before = h.ui.app.session.ds().unwrap().doc.clone();
+    let undo = h.ui.app.session.ds().unwrap().history.undo.len();
+    h.start();
+    assert!(h.ui.app.canvas_pointer.is_none());
+    crate::FigApp::request_canvas_pointer_cancel(&h.ui.ctx);
+    h.moved(p + vec2(50.0, 40.0));
+    h.end();
+    assert!(
+        Arc::ptr_eq(&before, &h.ui.app.session.ds().unwrap().doc),
+        "queued lifecycle cancellation must invalidate pending intent before the first Down"
+    );
+    assert!(h.ui.app.canvas_pointer.is_none());
+    assert_eq!(h.ui.app.session.ds().unwrap().history.undo.len(), undo);
+    h.start();
+    h.moved(p + vec2(90.0, 80.0));
+    h.end();
+    assert_eq!(h.ui.app.session.ds().unwrap().history.undo.len(), undo + 1);
 }

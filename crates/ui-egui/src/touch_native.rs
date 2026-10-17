@@ -210,6 +210,53 @@ pub struct Native {
     initialized: bool,
 }
 impl Native {
+    /// Select this policy before installing the app in the native host. This
+    /// also gates the very first frame if the raw hook cannot borrow the app.
+    pub fn enable(app: &mut FigApp) {
+        app.canvas.native_values = true;
+        app.canvas.native_hover = None;
+        app.canvas.native_position = None;
+    }
+    /// No engine operation can run while the app is borrowed elsewhere. Queue
+    /// rollback and drain source state before egui aggregates a reset/release.
+    pub fn unavailable(&mut self, ctx: &Context, raw: &mut egui::RawInput) -> crate::touch_events::Frame {
+        FigApp::request_canvas_pointer_cancel(ctx);
+        crate::handles::cancel_pointer(ctx);
+        crate::guides::cancel_pointer(ctx);
+        crate::proto_canvas::cancel_pointer(ctx);
+        ctx.stop_dragging();
+        let layout = self.consumer.layout.clone();
+        let mut frame = self.boundary.unavailable(raw, |position| layout.as_ref().map_or(Owner::Panel, |layout| layout.classify(ctx, position)));
+        // Interrupt retains unknown/held identities. Only explicit producer
+        // focus reset may recover a recognizer blocked by malformed input.
+        self.consumer.finger.gesture.interrupt();
+        self.consumer.finger.navigation = None;
+        for item in &frame.items {
+            if let crate::touch_events::Item::Contact(contact) = item {
+                self.consumer.finger.gesture.event(contact, Policy::Drag);
+            }
+        }
+        let focus_reset = !raw.focused || raw.events.iter().any(|event| matches!(event, egui::Event::WindowFocused(false)));
+        if focus_reset {
+            self.consumer.finger.gesture.reset();
+        } else if let Some((time, _, number)) = frame.timestamp {
+            self.consumer.finger.gesture.tick(time, number);
+        }
+        match self.consumer.physical.prepare(ctx, raw, &frame) {
+            Ok(physical) => self.consumer.mouse.abandon(physical.any_down),
+            Err(_) => {
+                self.consumer.mouse.abandon(true);
+                frame.blocked = true;
+                frame.interrupted = true;
+                frame.issues.push(crate::touch_events::Issue::PhysicalInput);
+                crate::touch_mouse::sanitize_metadata(raw);
+                raw.events.retain(crate::touch_mouse::finite);
+            }
+        }
+        self.consumer.frame = None;
+        self.consumer.layout = None;
+        frame
+    }
     /// Capture only after FigApp has completed drawing this window.
     pub fn complete_frame(&mut self, app: &FigApp, ctx: &Context) {
         if !self.initialized {
@@ -270,9 +317,7 @@ impl CanvasConsumer for Combined {
         frame: &crate::touch_events::Frame,
         current: bool,
     ) -> Result<bool, String> {
-        app.canvas.native_values = true;
-        app.canvas.native_hover = None;
-        app.canvas.native_position = None;
+        Native::enable(app);
         self.frame = None;
         let mut physical = self.physical.prepare(ctx, raw, frame).map_err(|error| format!("Unsupported physical input: {error:?}"))?;
         let tail = physical.navigation.filter(|navigation| navigation.ordinal.is_none());
@@ -377,3 +422,7 @@ mod tests {
 #[cfg(test)]
 #[path = "touch_native_tests.rs"]
 mod host_tests;
+
+#[cfg(test)]
+#[path = "touch_native_matrix_tests.rs"]
+mod matrix_tests;
