@@ -25,7 +25,7 @@ fn small_fixture() -> Result<Document, Box<dyn Error>> {
 
 struct Shell {
     field: String,
-    touch_observer: figcraft_ui_egui::touch_events::Normalizer,
+    input: figcraft_ui_egui::touch_native::Native,
     fit_requested: bool,
     smoke: bool,
     recovery: crate::recovery::Shared,
@@ -33,11 +33,8 @@ struct Shell {
 }
 
 impl eframe::App for Shell {
-    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
-        use figcraft_ui_egui::touch_events::{Owner, Routing};
-        // T34 observes the pinned producer before egui aggregates its events.
-        // T16 must install a complete consumer before any routing is enabled.
-        let frame = self.touch_observer.process(raw, Routing::Observe, |_| Owner::Suppressed);
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        let frame = figcraft_ui_egui::windows::with_app(|fig| self.input.process(fig, ctx, raw)).unwrap_or_else(|| self.input.unavailable(ctx, raw));
         for issue in frame.issues {
             log::warn!("Unsupported native touch sequence: {issue:?}");
         }
@@ -60,7 +57,7 @@ impl eframe::App for Shell {
             ui.separator();
         }
         let ctx = ui.ctx().clone();
-        figcraft_ui_egui::windows::with_app(|fig| {
+        let available = figcraft_ui_egui::windows::with_app(|fig| {
             if move_fixture {
                 let fixture = fig.session.doc().ok().and_then(|doc| doc.nodes().find(|node| node.name == "Fixture image").map(|node| node.id));
                 if let Some(id) = fixture {
@@ -71,7 +68,8 @@ impl eframe::App for Shell {
                 fig.run("view.zoomFit", serde_json::json!({}));
                 self.fit_requested = true;
             }
-            figcraft_ui_egui::windows::guard(fig, &ctx, |fig| fig.ui(ui));
+            let completed = figcraft_ui_egui::windows::guard(fig, &ctx, |fig| fig.ui(ui));
+            self.input.finish_frame(fig, &ctx, completed);
             crate::recovery::try_with(&self.recovery, |coordinator| {
                 if let Some(wait) = coordinator.tick(&fig.session, ctx.input(|i| i.time)) {
                     ctx.request_repaint_after(std::time::Duration::try_from_secs_f64(wait).unwrap_or(std::time::Duration::from_millis(50)));
@@ -81,6 +79,9 @@ impl eframe::App for Shell {
                 }
             });
         });
+        if available.is_none() {
+            self.input.abort_frame(&ctx);
+        }
     }
 }
 
@@ -104,6 +105,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
         fig.toast("Recovered your unsaved work.");
     }
     fig.ui.home = false;
+    figcraft_ui_egui::touch_native::Native::enable(&mut fig);
     figcraft_ui_egui::windows::install(fig);
     let mut options = eframe::NativeOptions { renderer: eframe::Renderer::Wgpu, ..Default::default() };
     if let eframe::egui_wgpu::WgpuSetup::CreateNew(create) = &mut options.wgpu_options.wgpu_setup {
@@ -123,14 +125,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
         Box::new(move |cc| {
             let lifecycle = figcraft_apple_ipad::LifecycleHost::new(crate::lifecycle::callback(recovery.clone(), cc.egui_ctx.clone()))
                 .map_err(std::io::Error::other)?;
-            Ok(Box::new(Shell {
-                field: String::new(),
-                touch_observer: Default::default(),
-                fit_requested: false,
-                smoke,
-                recovery,
-                _lifecycle: lifecycle,
-            }))
+            Ok(Box::new(Shell { field: String::new(), input: Default::default(), fit_requested: false, smoke, recovery, _lifecycle: lifecycle }))
         }),
     )?;
     Ok(())

@@ -785,3 +785,122 @@ fn ipad_native_matrix_hand() {
 fn ipad_native_matrix_scale() {
     matrix(Fixture::Scale);
 }
+
+fn ui_control(h: &Host) -> Host {
+    let mut c = Host::new();
+    c.ui.app.session = control(h);
+    c.ui.app.ui.home = h.ui.app.ui.home;
+    c.ui.app.ui.right_tab = h.ui.app.ui.right_tab;
+    c.ui.app.ui.comments.restore_pointer_ui(h.ui.app.ui.comments.pointer_ui());
+    c.ui.app.ui.comments.search.clone_from(&h.ui.app.ui.comments.search);
+    c.ui.app.ui.comments.filter = h.ui.app.ui.comments.filter;
+    c.ui.app.ui.comments.sort = h.ui.app.ui.comments.sort;
+    crate::proto_panel::open_editor(&c.ui.ctx, crate::proto_panel::editor(&h.ui.ctx));
+    c.time = h.time;
+    for _ in 0..3 {
+        c.run(vec![]);
+    }
+    c
+}
+fn ui_control_interrupt(c: &mut Host, cause: Cause) {
+    match cause {
+        Cause::Modal | Cause::Switch | Cause::Close => {
+            let (command, params) = match cause {
+                Cause::Modal => ("help.about", json!({})),
+                Cause::Switch => ("doc.switch", json!({"index":1})),
+                _ => ("file.close", json!({"force":true})),
+            };
+            c.ui.app.run(command, params).unwrap();
+            c.run(vec![]);
+        }
+        Cause::Focus => c.run(vec![Event::WindowFocused(false)]),
+        Cause::Viewport => c.run_custom(vec![], &[], |raw| raw.screen_rect = Some(egui::Rect::from_min_size(Pos2::ZERO, vec2(900.0, 1440.0)))),
+        Cause::Allocation => {
+            c.ui.app.canvas.rect.max.x -= 20.0;
+            c.run(vec![]);
+        }
+        Cause::Unavailable => {
+            c.unavailable(vec![]);
+            c.run(vec![]);
+        }
+        Cause::Panic => {
+            let completed = crate::windows::guard(&mut c.ui.app, &c.ui.ctx, |_| panic!("synthetic UI control panic"));
+            c.native.finish_frame(&c.ui.app, &c.ui.ctx, completed);
+            c.run(vec![]);
+        }
+        _ => c.run(vec![]),
+    }
+}
+fn assert_pointer_ui(h: &Host, c: &Host, cause: Cause) {
+    let a = &h.ui.app.ui.comments;
+    let e = &c.ui.app.ui.comments;
+    assert_eq!(
+        (a.open, &a.draft, &a.reply, &a.editing, &a.search, a.filter, a.sort),
+        (e.open, &e.draft, &e.reply, &e.editing, &e.search, e.filter, e.sort),
+        "{cause:?}: comment UI"
+    );
+    assert_eq!(crate::proto_panel::editor(&h.ui.ctx), crate::proto_panel::editor(&c.ui.ctx), "{cause:?}: prototype editor");
+    assert!(!a.dragging());
+}
+fn open_ui_matrix(prototype: bool) {
+    let fixture = if prototype { Fixture::Prototype } else { Fixture::CommentPin };
+    for cause in CAUSES {
+        let (mut h, from, to) = seed(fixture, cause);
+        if prototype {
+            let source = h.ui.app.session.selection()[0];
+            let dest = h.ui.app.session.doc().unwrap().nodes().find(|n| n.kind.is_frame_like()).unwrap().id;
+            h.ui.app.run("proto.interaction.add", json!({"id":source,"dest":dest})).unwrap();
+            crate::proto_panel::open_editor(&h.ui.ctx, Some((source, 0)));
+        } else {
+            let thread = h.ui.app.session.doc().unwrap().comments[0].id;
+            h.ui.app.ui.comments.show(thread);
+            h.ui.app.ui.comments.reply = "Keep this synthetic reply".into();
+            h.ui.app.ui.comments.search = "Synthetic".into();
+        }
+        for _ in 0..3 {
+            h.run(vec![]);
+        }
+        if prototype {
+            assert!(crate::proto_panel::editor(&h.ui.ctx).is_some());
+        } else {
+            assert!(h.ui.app.ui.comments.open.is_some());
+        }
+        let mut c = ui_control(&h);
+        let mut engine = control(&h);
+        h.pointer = from;
+        h.start();
+        h.moved(to);
+        assert!(h.ui.app.canvas_pointer.is_some(), "{fixture:?}/{cause:?}: enrolled preview with an existing open UI");
+        if !prototype {
+            // This independent panel filter is outside the pointer UI snapshot.
+            h.ui.app.ui.comments.search.clear();
+            c.ui.app.ui.comments.search.clear();
+        }
+        interrupt(&mut h, &mut engine, cause);
+        ui_control_interrupt(&mut c, cause);
+        assert_engine(&h.ui.app.session, &engine, fixture, cause);
+        assert_pointer_ui(&h, &c, cause);
+        match cause {
+            Cause::Focus => h.run_checked(
+                vec![touch(1, TouchPhase::End, h.pointer), button(h.pointer, false), Event::PointerGone],
+                &[crate::touch_events::Issue::MissingStart, crate::touch_events::Issue::PhysicalInput],
+            ),
+            Cause::Cancel => h.run(vec![button(h.pointer, false)]),
+            _ => h.end(),
+        }
+        if cause == Cause::Second {
+            h.run(vec![touch(2, TouchPhase::End, to + vec2(60.0, 20.0)), Event::PointerGone]);
+        }
+        c.run(vec![]);
+        assert_engine(&h.ui.app.session, &engine, fixture, cause);
+        assert_pointer_ui(&h, &c, cause);
+    }
+}
+#[test]
+fn ipad_native_open_comment_thread_survives_interruption_and_late_release() {
+    open_ui_matrix(false);
+}
+#[test]
+fn ipad_native_open_prototype_editor_survives_interruption_and_late_release() {
+    open_ui_matrix(true);
+}

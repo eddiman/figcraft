@@ -359,3 +359,33 @@ palette interaction exposed an unfinished tall rectangle, and tool.place refused
 while that drag was busy. Switching to Move and invoking vector.edit.begin reached
 the inspection state. These legacy-route attempts are recorded as unsuccessful
 gesture evidence. Native shell activation/runtime checks remain open.
+
+
+## 2026-10-17: T16 Native shell activation and open panel state
+
+The iPad shell now owns one Native coordinator and enables its policy before
+installing the editor. The raw hook uses the available editor or the coordinator's
+unavailable path. A successful guarded UI pass publishes the completed layout;
+a caught panic or unavailable UI borrow aborts the frame. Desktop and web retain
+their existing input policies. No dependency or Apple bridge changed.
+
+Two new regressions exercise already-open comment and prototype editors across
+ten interruption causes, comparing their state with an independent control UI
+after cancellation and late release. The comment case also changes a panel search
+filter during the preview and checks that cancellation preserves that change.
+The UI suite passes 565 tests with one ignored. Full CI passes 2,497 tests with
+zero failures and eight ignored. Both iOS target checks and simulator linking pass.
+
+In the linked Native simulator, one drag created one 125 by 100 rectangle and
+returned to Move. Undo removed the rectangle and Redo restored it once. A fresh
+drag moved it from X=311/Y=44 to X=241/Y=144 without changing its dimensions.
+Home and resume retained it, and a subsequent resize produced 175 by 140. Panel
+text displayed N16 after refocusing and retrying; the first typing attempt showed
+no text, so first-focus keyboard behavior remains unresolved. Runtime logs contain
+no panic or unsupported-touch diagnostic. These checks use synthetic content.
+
+T16 remains in progress. Actual SDK multi-touch interruption, one-finger release
+and subsequent editing remain unverified at runtime. The software matrix covers
+those paths, but it does not qualify native hardware. Physical testing remains
+deferred, Pencil identity remains T17 work and live editing enrollment remains
+restricted until T28. The full port goal remains active.

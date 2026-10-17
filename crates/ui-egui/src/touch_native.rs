@@ -1,5 +1,5 @@
-//! Completed layout ownership for the native consumer. Capturing these values
-//! does not activate input; the app still uses its passive T34 observer.
+//! Completed layout and ordered finger/physical input for the native iPad host.
+//! Other hosts retain their existing input policy.
 use egui::{Context, LayerId, Pos2, Rect};
 
 use figcraft_engine::tools::{PointerKind, ToolId};
@@ -200,8 +200,8 @@ impl CanvasConsumer for Finger {
     }
 }
 
-/// Ordered finger and physical values, still opt-in until the native Shell
-/// installs this policy. Context pointer aggregates cannot edit this canvas.
+/// Ordered finger and physical values selected by the native Shell.
+/// Context pointer aggregates cannot edit this canvas.
 #[derive(Default)]
 pub struct Native {
     boundary: crate::ordered_input::Boundary,
