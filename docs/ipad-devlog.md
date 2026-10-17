@@ -239,3 +239,34 @@ editor. Its smoke field displayed L16 with three characters after refocusing.
 T16 remains in progress. Guide, gradient/crop/blur/padding/gap and vector width/region rows,
 completed-frame/panic handling in the host and native activation/runtime evidence
 remain. Shell still uses Observe, and hardware qualification stays deferred.
+
+
+## 2026-10-17: T16 secondary panel pointer ownership
+
+The combined Native regression reproduced a panel field that stayed empty when
+another contact was held on the canvas. The pinned backend emits pointer events
+only for its numeric primary, so forwarding a secondary panel Touch did not give
+egui a pointer press. The opt-in normalizer now selects a panel contact by its
+fixed device/contact ID and emits panel pointer controls. It strips only the
+proven backend touch suffix; panel Touch and independent physical events remain
+in order. Observe keeps the original producer stream.
+
+The panel owner ends on its own release or cancellation. A canvas primary's End
+cannot release that panel pointer, and held panel contacts never inherit another
+contact's pointer. Independent physical pointer activity cancels the panel
+candidate before forwarding the physical event. Any held physical button prevents
+a new panel press. Cancellation uses the existing finite move/reset sequence so
+a short Cancel cannot click a button. Invalid input also clears the panel owner,
+including physical metadata rejected after normalization and unavailable app
+access.
+
+Nine new regression functions cover the failed field case, secondary Cancel,
+canvas-first release, physical takeover, fixed ownership without promotion,
+all five physical buttons, exact physical event indices and unsupported input.
+The UI suite passes 516 tests with one ignored. The initial takeover fixture used
+the canvas position for the backend End suffix after physical motion; it now
+uses the backend's last cursor position. The original field assertion remains.
+Full CI passes 2,448 tests with eight ignored. Both iOS target checks and
+simulator linking pass. The linked simulator build renders the synthetic editor
+and accepts P16 in its startup field. The native shell still observes input only. The remaining T16 matrix, guarded
+frame completion and native activation remain open; hardware testing is deferred.

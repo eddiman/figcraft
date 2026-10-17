@@ -156,6 +156,11 @@ impl Boundary {
         consumer.interrupt(app, ctx, why);
     }
 
+    pub(crate) fn reject_panel(&mut self, raw: &mut RawInput, frame: &mut Frame) {
+        let ordinal = raw.events.len();
+        self.normalizer.cancel_panel(&mut raw.events, frame, ordinal);
+    }
+
     fn flush_requested_cancel(&mut self, app: &mut FigApp, ctx: &Context, consumer: &mut impl CanvasConsumer) {
         if FigApp::canvas_pointer_cancel_requested(ctx) {
             app.canvas_pointer_preflight(ctx);
@@ -214,6 +219,7 @@ impl Boundary {
                 crate::touch_mouse::sanitize_metadata(raw);
                 self.interrupt(app, ctx, consumer, Interruption::UnsupportedInput);
                 self.normalizer.suppress_canvas();
+                self.reject_panel(raw, &mut frame);
                 forwarded = true;
                 app.toast(error);
             }

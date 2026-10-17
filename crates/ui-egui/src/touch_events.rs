@@ -102,7 +102,8 @@ pub struct Normalizer {
     backend_primary: Option<u64>,
     backend_position: Option<Pos2>,
     physical_primary: bool,
-    forwarded_touch_down: bool,
+    panel_pointer: Option<(ContactId, Pos2)>,
+    physical_buttons: u8,
     modifiers: Modifiers,
     frame: u64,
     time: Option<f64>,
@@ -121,6 +122,55 @@ fn primary(e: &Event, down: bool, position: Pos2) -> bool {
     matches!(e,Event::PointerButton{button:PointerButton::Primary,pressed,pos,..} if *pressed==down && same_position(*pos, position))
 }
 impl Normalizer {
+    /// Release only our panel pointer, before an independent physical event.
+    /// The moves invalidate egui's potential click before the control Up.
+    pub(crate) fn cancel_panel(&mut self, output: &mut Vec<Event>, result: &mut Frame, ordinal: usize) {
+        if let Some((_, pos)) = self.panel_pointer.take() {
+            if result.items.len() < MAX_ITEMS {
+                result.items.push(Item::PanelCancelled { ordinal });
+            }
+            output.extend([
+                Event::PointerMoved(Pos2::new(-1.0e6, -1.0e6)),
+                Event::PointerMoved(Pos2::new(1.0e6, 1.0e6)),
+                Event::PointerButton { pos, button: PointerButton::Primary, pressed: false, modifiers: self.modifiers },
+                Event::PointerGone,
+            ]);
+        }
+    }
+
+    fn panel_contact(&mut self, contact: &Contact, output: &mut Vec<Event>, result: &mut Frame) {
+        if contact.phase == TouchPhase::Cancel && self.panel_pointer.is_none_or(|(id, _)| id != contact.id) {
+            // Even an unselected panel contact cancels application drag owners.
+            if result.items.len() < MAX_ITEMS {
+                result.items.push(Item::PanelCancelled { ordinal: contact.ordinal });
+            }
+        }
+        if contact.phase == TouchPhase::Start && self.panel_pointer.is_none() && self.physical_buttons == 0 && !result.blocked {
+            self.panel_pointer = Some((contact.id, contact.position));
+            output.extend([
+                Event::PointerMoved(contact.position),
+                Event::PointerButton { pos: contact.position, button: PointerButton::Primary, pressed: true, modifiers: contact.modifiers },
+            ]);
+        } else if let Some((id, position)) = self.panel_pointer
+            && id == contact.id
+        {
+            match contact.phase {
+                TouchPhase::Move => {
+                    self.panel_pointer = Some((id, contact.position));
+                    output.push(Event::PointerMoved(contact.position));
+                }
+                TouchPhase::End => {
+                    self.panel_pointer = None;
+                    output.extend([
+                        Event::PointerButton { pos: position, button: PointerButton::Primary, pressed: false, modifiers: contact.modifiers },
+                        Event::PointerGone,
+                    ]);
+                }
+                TouchPhase::Cancel => self.cancel_panel(output, result, contact.ordinal),
+                TouchPhase::Start => {}
+            }
+        }
+    }
     pub fn reset(&mut self) {
         *self = Self::default();
     }
@@ -285,59 +335,30 @@ impl Normalizer {
                     owner = Owner::Suppressed;
                 }
                 let route_canvas = routing == Routing::CanvasConsumer && !matches!(owner, Owner::Panel);
+                let contact = Contact {
+                    id: key,
+                    source: Source::Unknown,
+                    phase: *phase,
+                    position: *pos,
+                    pressure: force.map(|f| f.clamp(0.0, 1.0)),
+                    modifiers: self.modifiers,
+                    time,
+                    clock,
+                    frame,
+                    ordinal: i,
+                    owner,
+                };
                 if result.items.len() < MAX_ITEMS {
-                    result.items.push(Item::Contact(Contact {
-                        id: key,
-                        source: Source::Unknown,
-                        phase: *phase,
-                        position: *pos,
-                        pressure: force.map(|f| f.clamp(0.0, 1.0)),
-                        modifiers: self.modifiers,
-                        time,
-                        clock,
-                        frame,
-                        ordinal: i,
-                        owner,
-                    }));
+                    result.items.push(Item::Contact(contact.clone()));
                 }
                 if !route_canvas {
                     output.push(event.clone());
-                    if valid {
-                        for e in original.iter().skip(i + 1).take(suffix) {
-                            output.push(e.clone());
+                    if routing == Routing::Observe {
+                        if valid {
+                            output.extend(original.iter().skip(i + 1).take(suffix).cloned());
                         }
-                    }
-                    if emulated {
-                        match phase {
-                            TouchPhase::Start => self.forwarded_touch_down = true,
-                            TouchPhase::End => self.forwarded_touch_down = false,
-                            TouchPhase::Cancel => {
-                                if routing == Routing::CanvasConsumer {
-                                    if result.items.len() < MAX_ITEMS {
-                                        result.items.push(Item::PanelCancelled { ordinal: i });
-                                    }
-                                    // Keep a separately held physical mouse down. A touch
-                                    // cancellation cannot manufacture its release.
-                                    if self.forwarded_touch_down && !self.physical_primary && valid && finite {
-                                        // stop_dragging does not clear egui's potential
-                                        // click. Mark this synthetic reset as moved before
-                                        // Up so a short Cancel cannot click a panel button.
-                                        // These are control events, never source matching.
-                                        output.push(Event::PointerMoved(Pos2::new(-1.0e6, -1.0e6)));
-                                        output.push(Event::PointerMoved(Pos2::new(1.0e6, 1.0e6)));
-                                        output.push(Event::PointerButton {
-                                            pos: *pos,
-                                            button: PointerButton::Primary,
-                                            pressed: false,
-                                            modifiers: self.modifiers,
-                                        });
-                                        output.push(Event::PointerGone);
-                                    }
-                                }
-                                self.forwarded_touch_down = false;
-                            }
-                            _ => {}
-                        }
+                    } else if !result.blocked {
+                        self.panel_contact(&contact, &mut output, &mut result);
                     }
                 }
                 if matches!(phase, TouchPhase::End | TouchPhase::Cancel) {
@@ -360,18 +381,29 @@ impl Normalizer {
                         continue;
                     }
                 }
+                if routing == Routing::CanvasConsumer && pointer(event) {
+                    self.cancel_panel(&mut output, &mut result, i);
+                }
                 match event {
                     Event::ModifiersChanged(modifiers) => self.modifiers = *modifiers,
                     Event::PointerMoved(p) => self.backend_position = Some(*p),
                     Event::PointerGone => self.backend_position = None,
-                    Event::PointerButton { button: PointerButton::Primary, pressed, .. } => self.physical_primary = *pressed,
+                    Event::PointerButton { button, pressed, .. } => {
+                        let mask = 1 << (*button as u8);
+                        if *pressed {
+                            self.physical_buttons |= mask;
+                        } else {
+                            self.physical_buttons &= !mask;
+                        }
+                        self.physical_primary = self.physical_buttons & 1 != 0;
+                    }
                     Event::WindowFocused(false) => {
                         lost_focus = true;
                         result.blocked = true;
                         result.interrupted = true;
                         self.suppress_canvas();
                         self.physical_primary = false;
-                        self.forwarded_touch_down = false;
+                        self.physical_buttons = 0;
                     }
                     _ => {}
                 }
@@ -392,6 +424,9 @@ impl Normalizer {
                 i += 1;
             }
         }
+        if routing == Routing::CanvasConsumer && result.blocked {
+            self.cancel_panel(&mut output, &mut result, original.len());
+        }
         self.overflow |= result.blocked;
         // Overflow makes contact identity incomplete. Explicit focus loss is the
         // reset boundary; guessing that an untracked contact ended is unsafe.
@@ -400,7 +435,7 @@ impl Normalizer {
             // egui-winit preserves its numeric primary and cursor on focus
             // loss. Keep that producer mirror for a late End/Cancel suffix.
             self.physical_primary = false;
-            self.forwarded_touch_down = false;
+            self.physical_buttons = 0;
             self.modifiers = Modifiers::default();
             self.time = None;
             self.overflow = false;

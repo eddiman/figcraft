@@ -249,6 +249,7 @@ impl Native {
                 frame.blocked = true;
                 frame.interrupted = true;
                 frame.issues.push(crate::touch_events::Issue::PhysicalInput);
+                self.boundary.reject_panel(raw, &mut frame);
                 crate::touch_mouse::sanitize_metadata(raw);
                 raw.events.retain(crate::touch_mouse::finite);
             }

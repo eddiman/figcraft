@@ -332,3 +332,89 @@ fn ipad_touch_contact_modifiers_follow_raw_order_within_one_frame() {
     assert_eq!(contacts[0].modifiers, Modifiers::SHIFT);
     assert_eq!(contacts[1].modifiers, Modifiers::ALT);
 }
+
+#[test]
+fn ipad_touch_secondary_panel_pointer_has_no_physical_samples_or_contact_promotion() {
+    let mut n = Normalizer::default();
+    let p = pos2(10.0, 20.0);
+    let mut input = raw(start(1, 1, p), 1.0);
+    n.process(&mut input, Routing::CanvasConsumer, canvas);
+    let mut input = raw(vec![touch(1, 2, TouchPhase::Start, p), touch(1, 3, TouchPhase::Start, p)], 2.0);
+    let frame = n.process(&mut input, Routing::CanvasConsumer, |_| Owner::Panel);
+    assert!(frame.issues.is_empty());
+    assert!(frame.items.iter().all(|item| matches!(item, Item::Contact(_))));
+    assert_eq!(input.events.iter().filter(|e| matches!(e, Event::PointerButton { pressed: true, .. })).count(), 1);
+    let mut input = raw(vec![touch(1, 2, TouchPhase::End, p), touch(1, 3, TouchPhase::Move, p)], 3.0);
+    n.process(&mut input, Routing::CanvasConsumer, |_| Owner::Panel);
+    assert_eq!(input.events.iter().filter(|e| matches!(e, Event::PointerButton { pressed: false, .. })).count(), 1);
+    assert!(!input.events.iter().any(|e| matches!(e, Event::PointerMoved(_))));
+    let mut input = raw(vec![touch(1, 3, TouchPhase::End, p)], 4.0);
+    n.process(&mut input, Routing::CanvasConsumer, |_| Owner::Panel);
+    assert_eq!(input.events, vec![touch(1, 3, TouchPhase::End, p)]);
+}
+
+#[test]
+fn ipad_touch_panel_cannot_acquire_pointer_while_any_physical_button_is_held() {
+    for button_kind in [PointerButton::Primary, PointerButton::Secondary, PointerButton::Middle, PointerButton::Extra1, PointerButton::Extra2] {
+        let mut n = Normalizer::default();
+        let ctx = Context::default();
+        let p = pos2(10.0, 20.0);
+        let physical = |pressed| Event::PointerButton { pos: p, button: button_kind, pressed, modifiers: Modifiers::NONE };
+        let mut input = raw(vec![physical(true)], 1.0);
+        n.process(&mut input, Routing::CanvasConsumer, canvas);
+        run(&ctx, input);
+        let mut input = raw(start(1, 1, p), 2.0);
+        n.process(&mut input, Routing::CanvasConsumer, |_| Owner::Panel);
+        assert_eq!(input.events, vec![touch(1, 1, TouchPhase::Start, p)]);
+        run(&ctx, input);
+        assert!(ctx.input(|i| i.pointer.button_down(button_kind)));
+        let mut input = raw(vec![physical(false), touch(1, 1, TouchPhase::Move, p), Event::PointerMoved(p)], 3.0);
+        n.process(&mut input, Routing::CanvasConsumer, |_| Owner::Panel);
+        assert_eq!(input.events, vec![physical(false), touch(1, 1, TouchPhase::Move, p)]);
+        let mut input = raw(vec![touch(1, 1, TouchPhase::End, p), button(false, p), Event::PointerGone], 4.0);
+        n.process(&mut input, Routing::CanvasConsumer, |_| Owner::Panel);
+        assert_eq!(input.events, vec![touch(1, 1, TouchPhase::End, p)]);
+    }
+}
+
+#[test]
+fn ipad_touch_physical_takeover_preserves_exact_events_and_indices_after_panel_reset() {
+    let mut n = Normalizer::default();
+    let p = pos2(10.0, 20.0);
+    let mut input = raw(start(1, 1, p), 1.0);
+    n.process(&mut input, Routing::CanvasConsumer, |_| Owner::Panel);
+    let physical = vec![Event::PointerMoved(p), button(true, p), Event::MouseMoved(egui::vec2(1.0, 2.0)), button(false, p), Event::PointerGone];
+    let mut input = raw(physical.clone(), 2.0);
+    let frame = n.process(&mut input, Routing::CanvasConsumer, canvas);
+    assert!(matches!(frame.items[0], Item::PanelCancelled { ordinal: 0 }));
+    let samples: Vec<_> = frame
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Input { index, .. } => Some(input.events[*index].clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(samples, physical);
+    assert_eq!(&input.events[4..], physical.as_slice());
+}
+
+#[test]
+fn ipad_touch_panel_pointer_is_released_on_focus_loss_or_invalid_clock() {
+    for focus in [false, true] {
+        let ctx = Context::default();
+        let mut n = Normalizer::default();
+        let p = pos2(10.0, 20.0);
+        let mut input = raw(start(1, 1, p), 1.0);
+        n.process(&mut input, Routing::CanvasConsumer, |_| Owner::Panel);
+        run(&ctx, input);
+        assert!(ctx.input(|i| i.pointer.primary_down()));
+        let mut input = raw(vec![], if focus { f64::NAN } else { 2.0 });
+        input.focused = focus;
+        let frame = n.process(&mut input, Routing::CanvasConsumer, |_| Owner::Panel);
+        assert!(frame.blocked);
+        assert!(frame.items.iter().any(|item| matches!(item, Item::PanelCancelled { .. })));
+        run(&ctx, input);
+        assert!(!ctx.input(|i| i.pointer.primary_down()));
+    }
+}

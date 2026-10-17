@@ -207,6 +207,25 @@ fn ipad_native_combined_pointer_enters_from_panel_and_clicks_in_same_batch() {
 }
 
 #[test]
+fn ipad_native_combined_secondary_panel_contact_accepts_text_while_canvas_is_held() {
+    let mut h = Host::new();
+    h.show_field = true;
+    h.run(vec![]);
+    h.run(vec![]);
+    let before = h.ui.app.session.ds().unwrap().doc.clone();
+    h.start();
+    let panel = h.field_rect.unwrap().center();
+    // egui-winit emits no pointer suffix for this non-primary contact.
+    h.run(vec![touch(2, TouchPhase::Start, panel)]);
+    h.run(vec![touch(2, TouchPhase::End, panel)]);
+    h.run(vec![Event::Text("Panel".into())]);
+    assert_eq!(h.field, "Panel");
+    assert!(Arc::ptr_eq(&before, &h.ui.app.session.ds().unwrap().doc));
+    assert!(h.ui.app.canvas_pointer.is_none());
+    h.end();
+    assert!(Arc::ptr_eq(&before, &h.ui.app.session.ds().unwrap().doc));
+}
+#[test]
 fn ipad_native_combined_panel_touch_field_accepts_text_exactly_once() {
     let mut h = Host::new();
     h.show_field = true;
@@ -558,4 +577,92 @@ fn ipad_native_queued_lifecycle_cancel_suppresses_pending_contact_before_down() 
     h.moved(p + vec2(90.0, 80.0));
     h.end();
     assert_eq!(h.ui.app.session.ds().unwrap().history.undo.len(), undo + 1);
+}
+
+#[test]
+fn ipad_native_combined_secondary_panel_cancel_does_not_click_or_release_canvas_into_edit() {
+    let mut h = Host::new();
+    h.show_field = true;
+    h.run(vec![]);
+    h.run(vec![]);
+    let before = h.ui.app.session.ds().unwrap().doc.clone();
+    h.start();
+    h.moved(h.pointer + vec2(40.0, 30.0));
+    let panel = h.cancelled_button_rect.unwrap().center();
+    h.run(vec![touch(2, TouchPhase::Start, panel)]);
+    assert!(Arc::ptr_eq(&before, &h.ui.app.session.ds().unwrap().doc));
+    assert!(h.ui.ctx.input(|i| i.pointer.primary_down()));
+    h.run(vec![touch(2, TouchPhase::Cancel, panel)]);
+    assert!(!h.clicked);
+    assert!(!h.ui.ctx.input(|i| i.pointer.primary_down()));
+    h.end();
+    assert!(!h.clicked);
+    assert!(Arc::ptr_eq(&before, &h.ui.app.session.ds().unwrap().doc));
+}
+
+#[test]
+fn ipad_native_combined_canvas_primary_end_keeps_secondary_panel_pointer_down() {
+    let mut h = Host::new();
+    h.show_field = true;
+    h.run(vec![]);
+    h.run(vec![]);
+    let before = h.ui.app.session.ds().unwrap().doc.clone();
+    h.start();
+    let panel = h.field_rect.unwrap().center();
+    h.run(vec![touch(2, TouchPhase::Start, panel)]);
+    h.end();
+    assert!(h.ui.ctx.input(|i| i.pointer.primary_down()));
+    // The backend has cleared its primary/cursor; this End has only Gone.
+    h.run(vec![touch(2, TouchPhase::End, panel), Event::PointerGone]);
+    assert!(!h.ui.ctx.input(|i| i.pointer.primary_down()));
+    h.run(vec![Event::Text("Panel".into())]);
+    assert_eq!(h.field, "Panel");
+    assert!(Arc::ptr_eq(&before, &h.ui.app.session.ds().unwrap().doc));
+}
+
+#[test]
+fn ipad_native_combined_physical_takeover_cancels_secondary_panel_click() {
+    let mut h = Host::new();
+    h.show_field = true;
+    h.run(vec![]);
+    h.run(vec![]);
+    h.start();
+    let panel = h.cancelled_button_rect.unwrap().center();
+    h.run(vec![touch(2, TouchPhase::Start, panel)]);
+    h.run(vec![Event::PointerMoved(panel), button(panel, true)]);
+    assert!(!h.clicked);
+    h.run(vec![touch(2, TouchPhase::End, panel)]);
+    assert!(h.ui.ctx.input(|i| i.pointer.primary_down()));
+    h.run(vec![button(panel, false)]);
+    // The independent mouse can perform its own click.
+    assert!(h.clicked);
+    // egui-winit uses the last backend cursor, including physical motion.
+    h.run(vec![touch(1, TouchPhase::End, h.pointer), button(panel, false), Event::PointerGone]);
+}
+
+#[test]
+fn ipad_native_combined_unsupported_physical_metadata_releases_panel_pointer() {
+    for unavailable in [false, true] {
+        let mut h = Host::new();
+        h.show_field = true;
+        h.run(vec![]);
+        h.run(vec![]);
+        let p = h.cancelled_button_rect.unwrap().center();
+        h.run(vec![touch(1, TouchPhase::Start, p), Event::PointerMoved(p), button(p, true)]);
+        assert!(h.ui.ctx.input(|i| i.pointer.primary_down()));
+        if unavailable {
+            h.time += 0.05;
+            let mut raw = RawInput { time: Some(h.time), ..Default::default() };
+            raw.viewports.get_mut(&egui::ViewportId::ROOT).unwrap().native_pixels_per_point = Some(f32::NAN);
+            let frame = h.native.unavailable(&h.ui.ctx, &mut raw);
+            assert!(frame.blocked);
+            h.ui.ctx.run_ui(raw, |_| {}).drop_without_applying_deltas();
+        } else {
+            h.run_custom(vec![], &[crate::touch_events::Issue::PhysicalInput], |raw| {
+                raw.viewports.get_mut(&egui::ViewportId::ROOT).unwrap().native_pixels_per_point = Some(f32::NAN);
+            });
+        }
+        assert!(!h.ui.ctx.input(|i| i.pointer.primary_down()));
+        assert!(!h.clicked);
+    }
 }
