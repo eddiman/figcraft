@@ -335,6 +335,19 @@ fn label(app: &FigApp, painter: &egui::Painter, r: Rect, g: &Placed) {
 }
 
 #[cfg(test)]
+pub(crate) fn native_pointer_preview(ctx: &egui::Context) -> Option<(&'static str, bool)> {
+    ctx.data(|data| {
+        let drag = data.get_temp::<GuideDrag>(drag_id())?;
+        let kind = match drag {
+            GuideDrag::New { .. } => "new",
+            GuideDrag::Move { copy: true, .. } => "copy",
+            GuideDrag::Move { .. } => "move",
+        };
+        Some((kind, data.get_temp::<Placed>(preview_id()).is_some()))
+    })
+}
+
+#[cfg(test)]
 mod pointer_cancel_tests {
     use super::*;
     use crate::canvas_pointer::tests::{cancel_and_release, preview_fixture};

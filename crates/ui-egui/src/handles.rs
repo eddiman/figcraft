@@ -628,3 +628,46 @@ mod pointer_cancel_tests {
         }
     }
 }
+
+#[cfg(test)]
+pub(crate) mod native_fixture {
+    use super::*;
+    pub(crate) fn owner(ctx: &egui::Context) -> Option<&'static str> {
+        ctx.data(|d| d.get_temp::<Drag>(drag_id())).map(|drag| match drag {
+            Drag::Gradient { .. } => "gradient",
+            Drag::Blur { .. } => "blur",
+            Drag::Crop { .. } => "crop",
+            Drag::Padding { .. } => "padding",
+            Drag::Gap { .. } => "gap",
+        })
+    }
+    pub(crate) fn gradient(app: &FigApp, which: usize) -> Option<Pos2> {
+        let (id, _, _, g) = gradient_target(app)?;
+        match which {
+            0 => {
+                let a = unit_to_screen(app, id, g.from)?;
+                let b = unit_to_screen(app, id, g.to)?;
+                Some(a + (b - a) * g.stops.get(1)?.position)
+            }
+            1 => unit_to_screen(app, id, g.to),
+            _ => unit_to_screen(app, id, g.width),
+        }
+    }
+    pub(crate) fn crop(app: &FigApp, corner: bool) -> Option<Pos2> {
+        let (id, _, _, _, rect) = crop_target(app)?;
+        let corners = crop_corners(app, id, rect)?;
+        Some(if corner { corners[0] } else { corners[0] + (corners[2] - corners[0]) * 0.5 })
+    }
+    pub(crate) fn blur(app: &FigApp, ctx: &egui::Context, which: usize) -> Option<Pos2> {
+        let (id, _, effect) = blur_target(app, ctx)?;
+        blur_points(app, id, &effect)?.get(which).copied()
+    }
+    pub(crate) fn layout(app: &FigApp, padding: bool, cross: bool) -> Option<Pos2> {
+        let z = al_zones(app)?;
+        if padding {
+            z.bands.first().map(|(_, r, _)| r.center())
+        } else {
+            z.gaps.iter().find(|g| g.key == if cross { "crossGap" } else { "gap" }).map(|g| g.rect.center())
+        }
+    }
+}

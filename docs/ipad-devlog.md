@@ -307,3 +307,55 @@ repeats; its source, idle harness and autosave code are unchanged. The initial
 failure remains recorded, and no test assertion or timing threshold was relaxed.
 
 The repeat full CI passes 2,456 tests with zero failures and eight ignored.
+
+
+## 2026-10-17: T16 combined Native cancellation matrix
+
+The combined Native coordinator now runs 45 fixtures against second contact,
+Cancel, focus loss, canvas allocation change, portrait viewport, modal, tab
+switch, close, unavailable app access and UI panic. The 450 interruption cases
+include nine draw tools, move/duplicate/resize/rotate/scale, arc/radius handles,
+gradient end/stop/width, crop move/scale, both progressive blur handles, padding,
+main/cross gap, guide create/move/copy/delete, vector point/Bezier/bend/width/
+region, marquee, Hand, earlier freehand/Pen/text/preedit, new/outside text,
+comment pin/cluster and prototype connector. Thirty-nine normal-release sequences
+confirm the new fixtures perform their intended operations before cancellation
+is tested. The six earlier fixture groups remain in the interruption matrix.
+
+The matrix requires an actual enrolled preview. Test-only handle/guide accessors
+report computed hit positions and owner/preview state; they never inject owners.
+Document, active tab/page, selection, text/preedit, vector selection, guide/hover/
+focus, text preview, rotation origin, history contents/limits, view, tool and
+accepted Pen state are compared with a pre-Down control engine after interruption
+and again after late release. Guide acceptance checks exact offsets and counts,
+duplication and the second freehand stroke check node counts, and point/region
+fixtures verify the intended sub-selection. Arc coordinates come from the arc
+handle geometry, so the fixture cannot pass by resizing the ellipse's edge.
+
+The initially unselected vector-point drag exposed a production layout defect.
+The vector panel's unwrapped instruction extended the canvas's right edge to
+1249.2; selecting a point changed it to 1200. The existing allocation barrier
+then cancelled the drag. Extra warmup did not avoid it. Wrapping the same hint
+within the panel keeps the allocation stable and permits that first point drag.
+A counterfactual run of the unchanged final fixture with the old hint failed;
+restoring the wrap passes normal release and all ten causes. Vertex preselection
+was not added, and resize cancellation was retained. Temporary tracing was removed.
+
+An initial new-text assertion incorrectly required a busy tool, while text Down
+creates a provisional layer and enters text editing immediately. The final test
+checks those actual states. An arc fixture initially hit the outer resize edge;
+it now uses the computed arc handle and requires its overlay. The final UI suite
+passes 563 tests with one ignored. Shell remains Observe until Native activation
+and runtime editing/navigation checks pass; hardware qualification remains deferred.
+
+
+Full CI passes 2,495 tests with zero failures and eight ignored. The first CI
+attempt stopped on a Clippy test-helper ordering rule; the helper was moved before
+the test module without relaxing the lint. Both final iOS checks and simulator
+linking pass. In the linked Observe-mode simulator, Actions entered vector edit
+and the hint visibly wrapped into two lines within the right panel. Earlier drag
+and Return attempts did not immediately produce a completed rectangle; subsequent
+palette interaction exposed an unfinished tall rectangle, and tool.place refused
+while that drag was busy. Switching to Move and invoking vector.edit.begin reached
+the inspection state. These legacy-route attempts are recorded as unsuccessful
+gesture evidence. Native shell activation/runtime checks remain open.

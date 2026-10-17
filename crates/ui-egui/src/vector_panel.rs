@@ -87,7 +87,14 @@ pub fn points(app: &mut FigApp, ui: &mut Ui, doc: &Document, ve: &VectorEdit) {
         let t = crate::theme::Tokens::get(ui.ctx());
         ui.horizontal(|ui| {
             ui.add_space(PAD);
-            widgets::label(ui, tr("Select points to edit their position, radius and mirroring"), t.text_secondary);
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(tr("Select points to edit their position, radius and mirroring"))
+                        .font(crate::theme::regular(11.0))
+                        .color(t.text_secondary),
+                )
+                .wrap(),
+            );
         });
         ui.add_space(8.0);
         return;
