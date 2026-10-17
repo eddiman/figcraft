@@ -174,6 +174,49 @@ fn ipad_native_combined_finger_pinch_cancels_draw_and_only_changes_view() {
     assert!(Arc::ptr_eq(&before, &h.ui.app.session.ds().unwrap().doc));
 }
 #[test]
+fn ipad_native_combined_pinch_release_either_contact_then_fresh_draw() {
+    for primary_first in [false, true] {
+        let mut h = Host::new();
+        let p = h.pointer;
+        let before = h.ui.app.session.ds().unwrap().doc.clone();
+        let undo = h.ui.app.session.ds().unwrap().history.undo.len();
+        let count = before.nodes().count();
+        h.start();
+        h.moved(p + vec2(50.0, 40.0));
+        let second = p + vec2(100.0, 40.0);
+        h.run(vec![touch(2, TouchPhase::Start, second)]);
+        let second = second + vec2(60.0, 20.0);
+        h.run(vec![touch(2, TouchPhase::Move, second)]);
+        assert!(Arc::ptr_eq(&before, &h.ui.app.session.ds().unwrap().doc));
+        assert!(!h.ui.app.session.tool.busy());
+        if primary_first {
+            h.end();
+            // The pinned producer resumes pointer emulation for the remaining
+            // contact. Native must still suppress editing until that contact ends.
+            let second = second + vec2(40.0, 30.0);
+            h.run(vec![touch(2, TouchPhase::Move, second), Event::PointerMoved(second)]);
+            h.run(vec![touch(2, TouchPhase::End, second), button(second, false), Event::PointerGone]);
+        } else {
+            h.run(vec![touch(2, TouchPhase::End, second)]);
+            h.moved(p + vec2(180.0, 80.0));
+            h.end();
+        }
+        assert!(Arc::ptr_eq(&before, &h.ui.app.session.ds().unwrap().doc));
+        assert_eq!(h.ui.app.session.ds().unwrap().history.undo.len(), undo);
+        assert!(h.ui.app.canvas_pointer.is_none());
+        assert!(!h.ui.app.session.tool.busy());
+        h.pointer = h.ui.app.canvas.rect.center();
+        h.start();
+        h.moved(h.pointer + vec2(60.0, 40.0));
+        assert!(h.ui.app.canvas_pointer.is_some(), "fresh contact must enroll after both navigation contacts release");
+        h.end();
+        assert!(h.ui.app.canvas_pointer.is_none());
+        assert!(!h.ui.app.session.tool.busy());
+        assert_eq!(h.ui.app.session.doc().unwrap().nodes().count(), count + 1);
+        assert_eq!(h.ui.app.session.ds().unwrap().history.undo.len(), undo + 1);
+    }
+}
+#[test]
 fn ipad_native_combined_panel_pinch_does_not_zoom_the_canvas() {
     let mut h = Host::new();
     let p = h.pointer;

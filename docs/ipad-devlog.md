@@ -389,3 +389,32 @@ and subsequent editing remain unverified at runtime. The software matrix covers
 those paths, but it does not qualify native hardware. Physical testing remains
 deferred, Pencil identity remains T17 work and live editing enrollment remains
 restricted until T28. The full port goal remains active.
+
+
+## 2026-10-17: T16 release-order recovery and runtime field audit
+
+A combined Native regression now checks both contact release orders after pinch
+cancels a provisional rectangle. Moving the remaining contact preserves the
+document and undo history. After both contacts lift, a fresh drag must enroll
+and create exactly one shape and undo entry. The primary-first fixture includes
+the pinned producer's resumed pointer emulation for the remaining contact; Native
+continues to suppress that contact. Initial fixture compilation and suffix errors
+are retained as development evidence.
+
+A temporary simulator audit logged raw events before and after Native and the
+synthetic rectangle transform. The first typing attempt and standalone Return
+produced no keyboard events at the raw hook. Retried typing arrived unchanged,
+and touching the Y field committed X=250 in the document. The audit narrows the
+missing input to delivery before Native; its cause remains unproven. Two prior
+follow-ups accepted text immediately after focus. No keyboard workaround or
+production logging was added. The committed production app was rebuilt and
+reinstalled after the diagnostic. Runtime multi-touch and physical qualification
+remain unverified.
+
+Full CI passes 2,498 tests with zero failures and eight ignored; the UI suite
+passes 566 with one ignored. The software implementation now enters review while
+the required device draw/pinch/release-one sequence remains deferred. This status
+does not release dependent cards or qualify hardware. The prior iOS checks and
+production rebuild cover unchanged shipping source; this arc adds a test and
+progress records. The independent T12 font-input and T13 clipboard/keyboard
+architecture decisions remain available for further work.
