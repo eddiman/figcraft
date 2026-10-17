@@ -69,6 +69,7 @@ pub mod theme;
 pub mod toolbar;
 pub mod touch;
 pub mod touch_events;
+pub mod touch_mouse;
 pub mod touch_native;
 pub mod typography;
 pub mod variable_ui;

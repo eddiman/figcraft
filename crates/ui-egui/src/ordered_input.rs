@@ -18,8 +18,22 @@ pub enum Interruption {
     NativeCancel,
 }
 
+pub struct PhysicalInput<'a> {
+    pub event: &'a Event,
+    pub ordinal: usize,
+    pub hit: Owner,
+    pub current: bool,
+}
+
 /// T16 must provide every operation. There is no production recognizer fallback.
 pub trait CanvasConsumer {
+    /// Legacy consumers forward physical values to egui; the native consumer
+    /// explicitly interprets those values and gates legacy canvas dispatch.
+    fn routes_physical(&self) -> bool;
+    fn physical_held(&self) -> bool;
+    /// Return true when frame-start wheel smoothing interrupted held contacts.
+    fn begin_frame(&mut self, app: &mut FigApp, ctx: &Context, raw: &RawInput, frame: &Frame, current: bool) -> Result<bool, String>;
+    fn physical_input(&mut self, app: &mut FigApp, ctx: &Context, input: PhysicalInput<'_>) -> bool;
     fn contact(&mut self, app: &mut FigApp, ctx: &Context, contact: &Contact);
     fn interrupt(&mut self, app: &mut FigApp, ctx: &Context, why: Interruption);
     /// Mirrors the normalizer's explicit focus reset; layout changes retain IDs.
@@ -143,12 +157,13 @@ impl Boundary {
         consumer: &mut impl CanvasConsumer,
     ) -> Frame {
         let physical_held = self.normalizer.physical_primary_down();
-        let frame = self.normalizer.process(raw, Routing::CanvasConsumer, classify);
+        let mut frame = self.normalizer.process(raw, Routing::CanvasConsumer, &classify);
         let interrupted_between_frames = self.last_interruption.is_some() && self.last_interruption != app.canvas_interruption;
         let had_owner = app.canvas_pointer.is_some();
         app.canvas_pointer_preflight(ctx);
         let valid = target.is_some_and(|t| t.current(app, ctx, raw));
-        let mut forwarded = !valid || physical_held || !raw.dropped_files.is_empty();
+        let routes_physical = consumer.routes_physical();
+        let mut forwarded = !valid || (physical_held && !routes_physical) || !raw.dropped_files.is_empty();
         app.canvas_input_blocked = frame.blocked;
         if frame.blocked {
             self.interrupt(app, ctx, consumer, Interruption::UnsupportedInput);
@@ -162,11 +177,35 @@ impl Boundary {
             // Start can use the current layout when its source is still valid.
             forwarded |= !valid;
         }
-        if physical_held || !raw.dropped_files.is_empty() {
+        if (physical_held && !routes_physical) || !raw.dropped_files.is_empty() {
             self.interrupt(app, ctx, consumer, Interruption::ForwardedPointer);
+        }
+        match consumer.begin_frame(app, ctx, raw, &frame, valid && !forwarded && !frame.blocked) {
+            Ok(true) => {
+                for suppressed in self.held.values_mut() {
+                    *suppressed = true;
+                }
+            }
+            Ok(false) => {}
+            Err(error) => {
+                frame.blocked = true;
+                frame.interrupted = true;
+                frame.issues.push(crate::touch_events::Issue::PhysicalInput);
+                app.canvas_input_blocked = true;
+                crate::touch_mouse::sanitize_metadata(raw);
+                self.interrupt(app, ctx, consumer, Interruption::UnsupportedInput);
+                self.normalizer.suppress_canvas();
+                forwarded = true;
+                app.toast(error);
+            }
         }
         let mut keyboard = crate::shortcuts::KeyboardFrame::new(&raw.events);
         let mut consumed = BTreeSet::new();
+        if routes_physical && frame.issues.contains(&crate::touch_events::Issue::PhysicalInput) {
+            // Keep text and supported panel events. Invalid physical geometry or
+            // scale cannot enter egui after the explicit consumer rejected it.
+            consumed.extend(raw.events.iter().enumerate().filter_map(|(index, event)| (!crate::touch_mouse::finite(event)).then_some(index)));
+        }
         let now = frame.timestamp.map_or(0.0, |(time, _, _)| time);
         for item in &frame.items {
             match item {
@@ -178,16 +217,19 @@ impl Boundary {
                         consumer.contact(app, ctx, contact);
                         continue;
                     }
+                    if routes_physical && consumer.physical_held() && contact.phase == TouchPhase::Start {
+                        self.interrupt(app, ctx, consumer, Interruption::ForwardedPointer);
+                    }
                     let current = target.is_some_and(|t| t.current(app, ctx, raw) && t.owner() == contact.owner);
                     if matches!(contact.owner, Owner::Canvas { .. }) && !current {
                         self.interrupt(app, ctx, consumer, Interruption::SourceOrLayout);
                         forwarded = true;
                     }
-                    if contact.phase == TouchPhase::Cancel {
+                    if contact.phase == TouchPhase::Cancel && self.held.get(&contact.id) == Some(&false) && current && !forwarded {
                         self.interrupt(app, ctx, consumer, Interruption::NativeCancel);
                     }
                     let mut contact = contact.clone();
-                    let suppressed = forwarded || !current || contact.owner == Owner::Suppressed;
+                    let suppressed = forwarded || !current || contact.owner == Owner::Suppressed || (routes_physical && consumer.physical_held());
                     if contact.phase == TouchPhase::Start && self.held.len() < MAX_CONTACTS {
                         self.held.insert(contact.id, suppressed);
                     }
@@ -223,12 +265,37 @@ impl Boundary {
                         forwarded = true;
                     }
                 }
-                Item::Input { index, kind, .. } => {
+                Item::Input { index, kind, ordinal } => {
                     let navigation =
                         raw.events.get(*index).is_some_and(|event| matches!(event, Event::MouseWheel { .. } | Event::Zoom(_) | Event::Rotate(_)));
                     if *kind == InputKind::Pointer || navigation {
-                        self.interrupt(app, ctx, consumer, Interruption::ForwardedPointer);
-                        forwarded = true;
+                        let handled = if routes_physical {
+                            for suppressed in self.held.values_mut() {
+                                *suppressed = true;
+                            }
+                            raw.events.get(*index).is_some_and(|event| {
+                                let position = match event {
+                                    Event::PointerMoved(p) | Event::PointerButton { pos: p, .. } => Some(*p),
+                                    _ => None,
+                                };
+                                consumer.physical_input(
+                                    app,
+                                    ctx,
+                                    PhysicalInput {
+                                        event,
+                                        ordinal: *ordinal,
+                                        hit: position.map_or(Owner::Suppressed, &classify),
+                                        current: !forwarded && !frame.blocked && target.is_some_and(|t| t.current(app, ctx, raw)),
+                                    },
+                                )
+                            })
+                        } else {
+                            false
+                        };
+                        if !handled {
+                            self.interrupt(app, ctx, consumer, Interruption::ForwardedPointer);
+                            forwarded = true;
+                        }
                     }
                 }
             }

@@ -45,6 +45,19 @@ impl Editor {
     }
 }
 impl CanvasConsumer for Editor {
+    fn routes_physical(&self) -> bool {
+        false
+    }
+    fn physical_held(&self) -> bool {
+        false
+    }
+    fn begin_frame(&mut self, _: &mut FigApp, _: &Context, _: &egui::RawInput, _: &crate::touch_events::Frame, _: bool) -> Result<bool, String> {
+        Ok(false)
+    }
+    fn physical_input(&mut self, _: &mut FigApp, _: &Context, _: crate::ordered_input::PhysicalInput<'_>) -> bool {
+        false
+    }
+
     fn contact(&mut self, app: &mut FigApp, ctx: &Context, c: &Contact) {
         if !matches!(c.owner, Owner::Canvas { .. }) {
             return;
@@ -202,6 +215,19 @@ fn ipad_ordered_external_command_invalidates_a_pending_contact_without_a_checkpo
         cancelled: bool,
     }
     impl CanvasConsumer for Pending {
+        fn routes_physical(&self) -> bool {
+            false
+        }
+        fn physical_held(&self) -> bool {
+            false
+        }
+        fn begin_frame(&mut self, _: &mut FigApp, _: &Context, _: &egui::RawInput, _: &crate::touch_events::Frame, _: bool) -> Result<bool, String> {
+            Ok(false)
+        }
+        fn physical_input(&mut self, _: &mut FigApp, _: &Context, _: crate::ordered_input::PhysicalInput<'_>) -> bool {
+            false
+        }
+
         fn contact(&mut self, _: &mut FigApp, _: &Context, c: &Contact) {
             if matches!(c.owner, Owner::Canvas { .. }) && c.phase == TouchPhase::Start {
                 self.pending = true;

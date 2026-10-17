@@ -162,6 +162,19 @@ impl Finger {
     }
 }
 impl CanvasConsumer for Finger {
+    fn routes_physical(&self) -> bool {
+        false
+    }
+    fn physical_held(&self) -> bool {
+        false
+    }
+    fn begin_frame(&mut self, _: &mut FigApp, _: &Context, _: &egui::RawInput, _: &crate::touch_events::Frame, _: bool) -> Result<bool, String> {
+        Ok(false)
+    }
+    fn physical_input(&mut self, _: &mut FigApp, _: &Context, _: crate::ordered_input::PhysicalInput<'_>) -> bool {
+        false
+    }
+
     fn contact(&mut self, app: &mut FigApp, ctx: &Context, contact: &Contact) {
         let outputs = self.gesture.event(contact, Self::policy(app, contact.position));
         self.apply(app, ctx, outputs);
@@ -186,6 +199,145 @@ impl CanvasConsumer for Finger {
         }
     }
 }
+
+/// Ordered finger and physical values, still opt-in until the native Shell
+/// installs this policy. Context pointer aggregates cannot edit this canvas.
+#[derive(Default)]
+pub struct Native {
+    boundary: crate::ordered_input::Boundary,
+    consumer: Combined,
+    generation: Option<u64>,
+    initialized: bool,
+}
+impl Native {
+    /// Capture only after FigApp has completed drawing this window.
+    pub fn complete_frame(&mut self, app: &FigApp, ctx: &Context) {
+        if !self.initialized {
+            self.generation = Some(0);
+            self.initialized = true;
+        }
+        self.consumer.layout = Layout::capture(app, ctx, self.consumer.layout.as_ref(), &mut self.generation);
+    }
+    pub fn process(&mut self, app: &mut FigApp, ctx: &Context, raw: &mut egui::RawInput) -> crate::touch_events::Frame {
+        let layout = self.consumer.layout.clone();
+        self.boundary.process(
+            app,
+            ctx,
+            raw,
+            layout.as_ref().map(|layout| &layout.target),
+            |p| layout.as_ref().map_or(Owner::Panel, |layout| layout.classify(ctx, p)),
+            &mut self.consumer,
+        )
+    }
+    pub fn phase(&self) -> Phase {
+        self.consumer.finger.phase()
+    }
+}
+#[derive(Default)]
+struct Combined {
+    finger: Finger,
+    mouse: crate::touch_mouse::Mouse,
+    physical: crate::touch_mouse::Physical,
+    frame: Option<crate::touch_mouse::PhysicalFrame>,
+    layout: Option<Layout>,
+}
+impl Combined {
+    fn hit(&self, ctx: &Context, position: Pos2) -> Owner {
+        self.layout.as_ref().map_or(Owner::Suppressed, |layout| layout.classify(ctx, position))
+    }
+    fn navigation(&mut self, app: &mut FigApp, ctx: &Context, navigation: crate::touch_mouse::Navigation, current: bool) -> bool {
+        self.finger.interrupt(app, ctx, Interruption::ForwardedPointer);
+        self.mouse.interrupt(app);
+        let on_canvas = current && navigation.position.is_some_and(|pos| matches!(self.hit(ctx, pos), Owner::Canvas { .. }));
+        if let Err(error) = crate::touch_mouse::Mouse::navigate(app, navigation, on_canvas) {
+            app.toast(error.to_string());
+        }
+        on_canvas
+    }
+}
+impl CanvasConsumer for Combined {
+    fn routes_physical(&self) -> bool {
+        true
+    }
+    fn physical_held(&self) -> bool {
+        self.mouse.any_down()
+    }
+    fn begin_frame(
+        &mut self,
+        app: &mut FigApp,
+        ctx: &Context,
+        raw: &egui::RawInput,
+        frame: &crate::touch_events::Frame,
+        current: bool,
+    ) -> Result<bool, String> {
+        app.canvas.native_values = true;
+        app.canvas.native_hover = None;
+        app.canvas.native_position = None;
+        self.frame = None;
+        let mut physical = self.physical.prepare(ctx, raw, frame).map_err(|error| format!("Unsupported physical input: {error:?}"))?;
+        let tail = physical.navigation.filter(|navigation| navigation.ordinal.is_none());
+        if tail.is_some() {
+            physical.navigation = None;
+        }
+        app.canvas.native_position = physical.position;
+        app.canvas.native_hover = physical.position.filter(|pos| current && matches!(self.hit(ctx, *pos), Owner::Canvas { .. }));
+        self.frame = Some(physical);
+        if let Some(navigation) = tail {
+            self.navigation(app, ctx, navigation, current);
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+    fn physical_input(&mut self, app: &mut FigApp, ctx: &Context, input: crate::ordered_input::PhysicalInput<'_>) -> bool {
+        if matches!(input.event, egui::Event::MouseWheel { .. } | egui::Event::Zoom(_) | egui::Event::Rotate(_)) {
+            let navigation = self.frame.as_mut().and_then(|frame| {
+                if frame.navigation.is_some_and(|navigation| navigation.ordinal == Some(input.ordinal)) { frame.navigation.take() } else { None }
+            });
+            if let Some(navigation) = navigation {
+                return self.navigation(app, ctx, navigation, input.current);
+            }
+            self.finger.interrupt(app, ctx, Interruption::ForwardedPointer);
+            self.mouse.interrupt(app);
+            return input.current;
+        }
+        // The explicit physical value interrupts finger intent first. An
+        // already-owned mouse remains enrolled across its Move/Up sequence.
+        self.finger.interrupt(app, ctx, Interruption::ForwardedPointer);
+        let sample = self.frame.as_ref().and_then(|frame| {
+            frame.samples.binary_search_by_key(&input.ordinal, |sample| sample.ordinal).ok().and_then(|index| frame.samples.get(index)).cloned()
+        });
+        let Some(sample) = sample else { return false };
+        match self.mouse.sample(app, ctx, &sample, input.hit, input.current) {
+            Ok(handled) => handled || (input.current && !sample.any_down && !matches!(sample.event, egui::Event::PointerButton { .. })),
+            Err(error) => {
+                app.toast(error.to_string());
+                false
+            }
+        }
+    }
+    fn contact(&mut self, app: &mut FigApp, ctx: &Context, contact: &Contact) {
+        self.finger.contact(app, ctx, contact);
+    }
+    fn interrupt(&mut self, app: &mut FigApp, ctx: &Context, why: Interruption) {
+        self.finger.interrupt(app, ctx, why);
+        self.mouse.interrupt(app);
+    }
+    fn producer_reset(&mut self, app: &mut FigApp, ctx: &Context) {
+        self.finger.reset(app, ctx);
+        self.mouse.reset(app);
+        self.physical.reset();
+        self.frame = None;
+    }
+    fn finish_frame(&mut self, app: &mut FigApp, ctx: &Context, timestamp: Option<(f64, Clock, u64)>) {
+        self.finger.finish_frame(app, ctx, timestamp);
+        self.frame = None;
+    }
+}
+
+#[cfg(test)]
+#[path = "touch_native_combined_tests.rs"]
+mod combined_tests;
 
 #[cfg(test)]
 mod tests {

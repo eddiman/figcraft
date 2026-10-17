@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use egui::{Event, Modifiers, PointerButton, Pos2, RawInput, TouchPhase};
 
 pub(crate) const MAX_CONTACTS: usize = 64;
-const MAX_ITEMS: usize = 4096;
+pub(crate) const MAX_ITEMS: usize = 4096;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ContactId {
@@ -63,6 +63,7 @@ pub enum Item {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Issue {
+    PhysicalInput,
     InvalidClock,
     NonFinite,
     DuplicateStart,

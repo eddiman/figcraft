@@ -455,19 +455,28 @@ fn text_key_events(app: &mut FigApp, events: &[Event], skip_text: &mut bool) {
 
 fn finish_text_keys(app: &mut FigApp, ctx: &Context) {
     // Triple-click on the edited text selects its line (double-click is handled by the engine).
-    if ctx.input(|i| i.pointer.button_triple_clicked(egui::PointerButton::Primary))
+    if !app.canvas.native_values
+        && ctx.input(|i| i.pointer.button_triple_clicked(egui::PointerButton::Primary))
         && let Some(pos) = ctx.input(|i| i.pointer.interact_pos())
-        && app.canvas.rect.contains(pos)
+    {
+        triple_click_value(app, pos);
+    }
+    app.sync_preedit();
+    ime_output(app, ctx);
+}
+
+/// The same line selection for a source-qualified physical triple click.
+/// An enrolled pointer keeps this command within its checkpoint.
+pub(crate) fn triple_click_value(app: &mut FigApp, pos: egui::Pos2) {
+    if app.canvas.rect.contains(pos)
         && let Some(te) = app.session.ds().ok().and_then(|d| d.text_edit.clone())
     {
         let p = app.to_page(pos);
         let inside = app.session.doc().ok().and_then(|d| d.world_bounds(te.id)).is_some_and(|b| b.contains(p));
         if inside && let Ok(idx) = app.session.text_index_at(te.id, p) {
-            app.run("text.edit.selectLine", json!({"index": idx}));
+            app.pointer_command("text.edit.selectLine", json!({"index": idx}));
         }
     }
-    app.sync_preedit();
-    ime_output(app, ctx);
 }
 
 /// Shortcuts live while editing text (Bold, lists, alignment, size/weight/spacing steps, Save…).

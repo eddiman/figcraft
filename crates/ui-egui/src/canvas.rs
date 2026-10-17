@@ -50,6 +50,10 @@ pub struct CanvasState {
     dragging: bool,
     /// An explicit value owns every release, including releases handled by overlays.
     value_owned: bool,
+    pub(crate) native_values: bool,
+    pub(crate) native_hover: Option<Pos2>,
+    pub(crate) native_position: Option<Pos2>,
+    value_cursor: bool,
     space_pan: bool,
     middle_pan: Option<(Pos2, f64, f64)>,
     /// The zoom tool (Z held): zooming out (Alt) or in, and where its drag started.
@@ -68,6 +72,12 @@ pub struct CanvasState {
 }
 
 impl CanvasState {
+    /// Presentation for the explicit physical pointer's navigation intent.
+    pub(crate) fn value_navigation(&mut self, pan: bool, zoom: Option<bool>, area: Option<Pos2>) {
+        self.space_pan = pan;
+        self.zoom_tool = zoom;
+        self.zoom_drag = area;
+    }
     pub(crate) fn cancel_pointer(&mut self) {
         self.dragging = false;
         self.value_owned = false;
@@ -94,6 +104,10 @@ impl Default for CanvasState {
             render_work: None,
             dragging: false,
             value_owned: false,
+            native_values: false,
+            native_hover: None,
+            native_position: None,
+            value_cursor: true,
             space_pan: false,
             middle_pan: None,
             cursor: None,
@@ -264,7 +278,8 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
     }
     app.session.tool.labels = overlays(app, &painter, &t);
     // The zoom tool's area.
-    if let (Some(start), Some(p)) = (app.canvas.zoom_drag, ctx.input(|i| i.pointer.hover_pos())) {
+    let pointer_position = if app.canvas.native_values { app.canvas.native_position } else { ctx.input(|i| i.pointer.hover_pos()) };
+    if let (Some(start), Some(p)) = (app.canvas.zoom_drag, pointer_position) {
         let area = Rect::from_two_pos(start, p);
         if area.width() > 4.0 || area.height() > 4.0 {
             painter.rect_filled(area, CornerRadius::ZERO, ACCENT.gamma_multiply(0.1));
@@ -284,7 +299,8 @@ pub fn show(app: &mut FigApp, ui: &mut Ui, worker: &mut Worker) {
     crate::dev_mode::focus_bar(app, &ctx, rect);
     // The cursor: the tool's, unless something on the canvas with its own has the pointer.
     app.canvas.cursor = None;
-    if let (true, Some(at)) = (own_cursor && resp.hovered(), ctx.input(|i| i.pointer.hover_pos())) {
+    let cursor_hovered = if app.canvas.native_values { app.canvas.native_hover.is_some() } else { resp.hovered() };
+    if let (true, Some(at)) = (own_cursor && cursor_hovered, pointer_position) {
         let panning = app.canvas.space_pan || app.canvas.middle_pan.is_some();
         let shown = crate::cursors::on_canvas(panning, ctx.input(|i| i.pointer.any_down()), app.canvas.zoom_tool, app.session.tool.overlay.cursor);
         shown.show(&ctx, at);
@@ -402,7 +418,14 @@ fn zoom_tool(app: &mut FigApp, ui: &Ui, resp: &egui::Response, pos: Pos2, mods: 
 /// then doesn't show.
 fn input(app: &mut FigApp, ui: &mut Ui, resp: &egui::Response) -> bool {
     app.canvas_pointer_preflight(ui.ctx());
-    if app.canvas_input_blocked || app.canvas.value_owned {
+    if app.canvas_input_blocked {
+        return true;
+    }
+    if app.canvas.native_values {
+        drop_input(app, ui.ctx(), app.canvas.native_hover);
+        return app.canvas.value_cursor;
+    }
+    if app.canvas.value_owned {
         return true;
     }
     if crate::proto_canvas::input(app, ui, resp) {
@@ -414,20 +437,7 @@ fn input(app: &mut FigApp, ui: &mut Ui, resp: &egui::Response) -> bool {
     let editing_text = app.session.ds().map(|d| d.text_edit.is_some()).unwrap_or(false);
     let typing_elsewhere = crate::a11y::field_focused(&ctx);
     app.canvas.space_pan = space && !editing_text && !typing_elsewhere;
-    // Dropped files import onto the canvas.
-    let dropped = ctx.input(|i| i.raw.dropped_files.clone());
-    for f in dropped {
-        let path = f.path().to_path_buf();
-        let pt = hover_pos.map(|h| app.to_page(h)).unwrap_or_default();
-        if path.exists() {
-            app.run("file.import", json!({"path": path.to_string_lossy(), "x": pt.x, "y": pt.y}));
-        } else if let Some(bytes) = dropped_bytes(&f) {
-            use base64::Engine as _;
-            let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-            let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "dropped.png".into());
-            app.run("file.import", json!({"data": b64, "name": name, "x": pt.x, "y": pt.y}));
-        }
-    }
+    drop_input(app, &ctx, hover_pos);
     let Some(pos) = hover_pos.filter(|p| app.canvas.rect.contains(*p)) else {
         // Leaving the canvas: nothing is hovered there any more.
         if !app.canvas.dragging && std::mem::take(&mut app.canvas.hovering) {
@@ -558,6 +568,23 @@ fn input(app: &mut FigApp, ui: &mut Ui, resp: &egui::Response) -> bool {
     true
 }
 
+fn drop_input(app: &mut FigApp, ctx: &egui::Context, hover_pos: Option<Pos2>) {
+    // Dropped files import onto the canvas.
+    let dropped = ctx.input(|i| i.raw.dropped_files.clone());
+    for f in dropped {
+        let path = f.path().to_path_buf();
+        let pt = hover_pos.map(|h| app.to_page(h)).unwrap_or_default();
+        if path.exists() {
+            app.run("file.import", json!({"path": path.to_string_lossy(), "x": pt.x, "y": pt.y}));
+        } else if let Some(bytes) = dropped_bytes(&f) {
+            use base64::Engine as _;
+            let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+            let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "dropped.png".into());
+            app.run("file.import", json!({"data": b64, "name": name, "x": pt.x, "y": pt.y}));
+        }
+    }
+}
+
 /// Dispatch one enrolled value through the same on-canvas owners as legacy
 /// input. Hover may run without enrollment; editing never falls back to an
 /// unowned engine call after cancellation or an error.
@@ -589,7 +616,7 @@ pub fn pointer_value(
         pos: Some(pos),
         pressed: kind == PointerKind::Down,
         down: matches!(kind, PointerKind::Down | PointerKind::Move),
-        released: kind == PointerKind::Up,
+        released: matches!(kind, PointerKind::Up | PointerKind::DoubleClick),
         modifiers,
         hovered: app.canvas.rect.contains(pos),
     };
@@ -600,6 +627,7 @@ pub fn pointer_value(
             && (crate::comments::input_value(app, ctx, input)
                 || crate::guides::input_value(app, ctx, input)
                 || crate::handles::input_value(app, ctx, input)));
+    app.canvas.value_cursor = !handled;
     if handled {
         if kind != PointerKind::Hover && app.canvas_pointer.is_none() {
             return Err(figcraft_engine::EngineError::Disabled(
@@ -621,10 +649,20 @@ pub fn pointer_value(
         _ => {}
     }
     let event = pointer_event(app, kind, pos, &modifiers);
-    if kind == PointerKind::Up {
+    if matches!(kind, PointerKind::Up | PointerKind::DoubleClick) {
         app.canvas.pressure = None;
     }
-    app.pointer_session(|session| session.pointer(&event))
+    app.pointer_session(|session| {
+        session.pointer(&event)?;
+        if kind == PointerKind::DoubleClick {
+            // DoubleClick handles the click action but some tools retain their
+            // second Down's drag. This value is also its physical release.
+            let mut release = event;
+            release.kind = PointerKind::Up;
+            session.pointer(&release)?;
+        }
+        Ok(())
+    })
 }
 
 /// Right-click at screen `pos`: select what's under the pointer (`deep`: the nested layer), then

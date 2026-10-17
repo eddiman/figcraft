@@ -156,3 +156,48 @@ do not activate native touch editing. Independent physical mouse dispatch,
 aggregate panel-touch zoom policy and the remaining integration matrix must be
 completed before activation. Device qualification remains deferred. No native
 bridge, dependency, asset, persistence or collaboration change is included.
+
+
+## 2026-10-17: T16 combined finger and physical pointer route, in progress
+
+The opt-in Native coordinator now routes normalized finger contacts and
+independent physical pointer values in raw order. Its physical mirror uses the
+pinned public egui InputState for click classification and one whole-frame
+wheel/trackpad result. Panel touch suffixes never enter that mirror, including
+an identical-position independent mouse event after a suffix. The mirror retains
+no typed text, IME, clipboard payload or dropped-file handles. Source validation
+rejects nonfinite navigation and metadata and blocks canvas editing until focus
+reset; invalid values do not reach egui geometry.
+
+Physical Down enrolls the existing checkpoint. Move/Up, comment/prototype/guide/
+handle interpretation, Space/Z/middle navigation and secondary click use explicit
+values. The combined route gates aggregate canvas pointer dispatch for the whole
+UI pass, even after an accepted touch has finished. Panel widgets keep their raw
+egui input. A source-specific hover position also drives canvas presentation and
+file-drop placement. Ordinary desktop/web policy remains the default.
+
+A regression exposed an engine text selection drag retained after DoubleClick.
+The value dispatcher now completes its physical release inside the checkpoint,
+retaining the word selection and permitting the next click. The shared line
+selection action handles an explicit physical triple click without replaying
+Context click flags. Another regression exposed a cancelled finger's late End
+cancelling a newer mouse scope. The boundary now keeps that End suppressed while
+a new finger Start still interrupts a held mouse. A test fixture also assumed
+that a shape tool remained selected after a draw; it now explicitly enables the
+existing keep-tool preference when testing two draws in one batch.
+
+The final UI suite passes with 491 tests and one ignored test. Full CI passes
+with 2,423 tests, zero failures and eight ignored tests. Both iOS target checks
+and simulator linking pass. The rebuilt simulator editor renders and accepts
+M16 in its smoke field exactly once. New tests cover
+physical click timing/order, wheel equivalence across frames, panel suffix
+isolation, scoped edits/navigation, word/line selection, mixed mouse/touch
+exactly-once behavior, text ordering, panel field typing, held mouse plus panel
+Cancel, panel pinch isolation and recovery after unsupported values. The native
+Shell remains Observe. Specialized operation/interruption coverage, the missing-
+app-borrow guard and Shell integration/runtime evidence remain before activation.
+When no completed canvas map exists, new contacts remain with egui's panel
+route. This keeps home/modal controls operational while the native canvas gate
+prevents edits and fixed ownership prevents a held contact from transferring
+when a map appears. Both cases have regression tests.
+T16 and the full port goal remain incomplete; physical qualification is deferred.
