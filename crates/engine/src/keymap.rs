@@ -20,7 +20,7 @@ pub enum Platform {
 impl Platform {
     /// The platform this build runs on (the web build asks the browser instead, in the UI).
     pub const fn current() -> Self {
-        if cfg!(target_os = "macos") { Self::Mac } else { Self::Other }
+        if cfg!(any(target_os = "macos", target_os = "ios")) { Self::Mac } else { Self::Other }
     }
 }
 

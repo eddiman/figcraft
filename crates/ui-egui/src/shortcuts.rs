@@ -25,8 +25,12 @@ pub fn platform() -> Platform {
     }
 }
 
+fn detected_platform(os: egui::os::OperatingSystem) -> Platform {
+    if os.is_mac() { Platform::Mac } else { Platform::Other }
+}
+
 fn note_platform(ctx: &Context) {
-    PLATFORM.store(if ctx.os() == egui::os::OperatingSystem::Mac { 1 } else { 2 }, Ordering::Relaxed);
+    PLATFORM.store(if detected_platform(ctx.os()) == Platform::Mac { 1 } else { 2 }, Ordering::Relaxed);
 }
 
 /// The keymap's view of egui's modifiers (Ctrl off macOS sets egui's `command` too).
@@ -516,4 +520,33 @@ fn ime_output(app: &FigApp, ctx: &Context) {
             should_interrupt_composition: false,
         })
     });
+}
+
+#[cfg(test)]
+mod ipad_platform_tests {
+    use super::*;
+
+    #[test]
+    fn ipad_apple_shortcut_mapping() {
+        use egui::os::OperatingSystem as Os;
+        for os in [Os::IOS, Os::Mac] {
+            let platform = detected_platform(os);
+            assert_eq!(platform, Platform::Mac);
+            let command = mods(Modifiers::MAC_CMD | Modifiers::COMMAND);
+            let control = mods(Modifiers::CTRL);
+            for (key, id) in [("Z", "edit.undo"), ("C", "edit.copy"), ("V", "edit.paste"), ("S", "file.save")] {
+                assert_eq!(keymap::lookup(platform, keymap::Context::Canvas, key, command).map(|binding| binding.id), Some(id));
+                assert_ne!(keymap::lookup(platform, keymap::Context::Canvas, key, control).map(|binding| binding.id), Some(id));
+            }
+        }
+        for os in [Os::Windows, Os::Nix, Os::Android, Os::Unknown] {
+            let platform = detected_platform(os);
+            assert_eq!(platform, Platform::Other);
+            assert_eq!(
+                keymap::lookup(platform, keymap::Context::Canvas, "S", mods(Modifiers::CTRL | Modifiers::COMMAND)).map(|binding| binding.id),
+                Some("file.save")
+            );
+        }
+        assert_eq!(Platform::current(), if cfg!(any(target_os = "macos", target_os = "ios")) { Platform::Mac } else { Platform::Other });
+    }
 }

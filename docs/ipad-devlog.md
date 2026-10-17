@@ -467,3 +467,15 @@ manual same-font export recipe. T12 enters review pending the deferred physical
 font/render comparison; no dependent card is released. The full port remains
 incomplete, and T13's modifier/clipboard architecture is the next independent
 work.
+
+## 2026-10-17: T13 Apple shortcut table prerequisite
+
+The engine build detector now includes iOS in Apple shortcut semantics, and the
+UI detector uses egui's Apple classification for macOS and iOS. The regression
+checks Cmd-Z/C/V/S, distinct Control behavior and Ctrl-based mapping for Windows,
+Unix, Android and unknown browser platforms without changing the global platform
+cache during the test. This establishes table selection only. The pinned winit
+iOS backend has no hardware press or modifier producer, and egui-winit's modifier
+conversion excludes iOS from Apple semantics. Native clipboard ownership also
+remains unresolved. T13 stays blocked on the reviewed native boundary; no hardware
+keyboard, paste, field-focus or image clipboard qualification is claimed.
