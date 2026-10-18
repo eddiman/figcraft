@@ -88,7 +88,7 @@ resolved temporary lockfile with --locked. No production manifest/lockfile is
 rewritten, and the temporary directory is removed on exit. These are headless
 host-loop tests, not simulator interaction or physical lifecycle qualification.
 
-The prerequisite checks simulate unavailable tools/targets through temporary wrappers rather than uninstalling anything. Physical-device checks are deferred by the user; simulator passes do not certify Pencil, thermal/memory behavior or ten physical suspend/resume cycles. VoiceOver, contrast and reduced-motion requirements are excluded from the iPad port scope and acceptance gates. Existing shared code, labels, keyboard navigation and UI sizing requirements remain. T03 creates development builds, not a qualified alpha or release candidate.
+The prerequisite checks simulate unavailable tools/targets through temporary wrappers rather than uninstalling anything. They also verify that a failed repository-directory change cannot invoke the font validator's Cargo command. Physical-device checks are deferred by the user; simulator passes do not certify Pencil, thermal/memory behavior or ten physical suspend/resume cycles. VoiceOver, contrast and reduced-motion requirements are excluded from the iPad port scope and acceptance gates. Existing shared code, labels, keyboard navigation and UI sizing requirements remain. T03 creates development builds, not a qualified alpha or release candidate.
 
 ## Automated simulator tests and CI (T23)
 

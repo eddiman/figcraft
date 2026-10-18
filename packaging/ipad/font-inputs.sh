@@ -3,7 +3,7 @@
 # The host validator must not inherit the native SDK or required-font build flag.
 ipad_font_task() (
     unset SDKROOT CRAFT_FONTS_REQUIRED FIGCRAFT_EMBED_CJK CARGO_BUILD_TARGET
-    cd "$IPAD_REPO"
+    cd "$IPAD_REPO" || ipad_fail "cannot enter repository directory: $IPAD_REPO"
     cargo xtask ipad-fonts "$@"
 )
 

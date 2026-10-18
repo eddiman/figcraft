@@ -1,5 +1,16 @@
 # Local iPad port development log
 
+## 2026-10-18: T23 remote packaging repair
+
+Fork PR #1 targets `ipad/upstream-baseline` at the reviewed upstream SHA,
+avoiding an incidental merge of the fork main branch's newer upstream history.
+The first remote packaging job found that the font helper's directory change
+was not guarded when called from a conditional. It now fails explicitly before
+invoking Cargo if the repository directory cannot be entered. A regression
+exercises that conditional path with a missing directory and a stub Cargo.
+All packaging ShellCheck checks, four prerequisite tests and local full CI pass.
+Hosted iPad and Linux/web qualification is still in progress.
+
 ## 2026-10-18: T23 simulator runner and unsigned CI configuration
 
 Continued with simulator/CI work under the user's instruction to choose a task

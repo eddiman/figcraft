@@ -43,6 +43,26 @@ def ipad_missing_sdk():
         assert 'missing SDK: iphonesimulator' in result.stdout, result.stdout
         print('ipad_missing_sdk: PASS (nonzero exit, actionable error)')
 
+def ipad_font_task_requires_repository():
+    with tempfile.TemporaryDirectory(prefix='figcraft-ipad-font-cwd-') as directory:
+        cargo = Path(directory) / 'cargo'
+        cargo.write_text('#!/bin/bash\nprintf "unexpected cargo invocation\\n"\n')
+        cargo.chmod(0o755)
+        env = os.environ.copy()
+        env['PATH'] = directory + os.pathsep + env['PATH']
+        result = subprocess.run([
+            '/bin/bash', '-c',
+            'source "$1/prerequisites.sh"; source "$1/font-inputs.sh"; '
+            'IPAD_REPO="$2/missing"; '
+            'if ipad_font_task check unused; then exit 0; else exit 1; fi',
+            'ipad-font-cwd-test', str(script.parent), directory,
+        ], env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        assert result.returncode != 0, result.stdout
+        assert 'cannot enter repository directory' in result.stdout, result.stdout
+        assert 'unexpected cargo invocation' not in result.stdout, result.stdout
+        print('ipad_font_task_requires_repository: PASS (failed cd cannot run Cargo)')
+
 ipad_missing_xcode()
 ipad_missing_target()
 ipad_missing_sdk()
+ipad_font_task_requires_repository()
