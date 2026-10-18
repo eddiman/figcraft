@@ -137,6 +137,38 @@ impl IPadServices {
     }
 }
 impl Services for IPadServices {
+    fn clipboard_requires_confirmation(&self) -> bool {
+        true
+    }
+    fn clipboard_read_owned(&mut self) -> Option<egui::PasteOutcome> {
+        Some(self.context.as_ref().map(|ctx| ctx.read_owned_paste()).unwrap_or(egui::PasteOutcome::Failed(egui::PasteError::Unavailable)))
+    }
+    fn clipboard_try_set_text(&mut self, text: &str) -> Result<(), String> {
+        self.context
+            .as_ref()
+            .ok_or_else(|| "Clipboard context is unavailable".to_owned())?
+            .try_copy_text(text.to_owned())
+            .map_err(|error| error.to_string())
+    }
+    fn clipboard_try_set_layers(&mut self, text: &str) -> Result<Option<egui::PasteIdentity>, String> {
+        self.context
+            .as_ref()
+            .ok_or_else(|| "Clipboard context is unavailable".to_owned())?
+            .try_copy_text_receipt(text.to_owned())
+            .map_err(|error| error.to_string())
+    }
+    fn clipboard_set_text(&mut self, text: &str) {
+        if let Err(error) = self.clipboard_try_set_text(text) {
+            log::warn!("Clipboard write failed: {error}");
+        }
+    }
+    fn clipboard_set_png(&mut self, width: u32, height: u32, rgba: &[u8]) {
+        if let Some(ctx) = &self.context {
+            if let Err(error) = ctx.try_copy_rgba(egui::PasteImage { width, height, rgba: rgba.to_vec() }) {
+                log::warn!("Clipboard image write failed: {error}");
+            }
+        }
+    }
     fn emergency_save(&mut self, session: &figcraft_engine::Session) {
         crate::lifecycle::emergency(&self.recovery, session);
     }

@@ -1,6 +1,8 @@
 //! iOS entry point. Host workspace checks do not initialize the native host.
 #[cfg(target_os = "ios")]
 mod app;
+#[cfg(target_os = "ios")]
+mod clipboard;
 #[cfg(any(target_os = "ios", test))]
 mod documents;
 #[cfg(target_os = "ios")]

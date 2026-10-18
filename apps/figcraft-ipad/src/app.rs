@@ -24,6 +24,7 @@ fn small_fixture() -> Result<Document, Box<dyn Error>> {
 }
 
 struct Shell {
+    _clipboard: crate::clipboard::Clipboard,
     field: String,
     input: figcraft_ui_egui::touch_native::Native,
     fit_requested: bool,
@@ -85,6 +86,9 @@ impl eframe::App for Shell {
         if available.is_none() {
             self.input.abort_frame(&ctx);
         }
+        for error in ctx.take_text_clipboard_errors() {
+            figcraft_ui_egui::windows::with_app(|fig| fig.toast(error.to_string()));
+        }
     }
 }
 
@@ -126,9 +130,22 @@ pub fn run() -> Result<(), Box<dyn Error>> {
         "FigCraft iPad",
         options,
         Box::new(move |cc| {
+            cc.egui_ctx.require_text_clipboard_confirmation();
+            cc.egui_ctx.require_owned_paste();
+            figcraft_ui_egui::windows::with_app(|fig| fig.services.set_request_repaint(cc.egui_ctx.clone()))
+                .ok_or_else(|| std::io::Error::other("Shared editor unavailable during clipboard attachment"))?;
+            let clipboard = crate::clipboard::Clipboard::install(&cc.egui_ctx).map_err(std::io::Error::other)?;
             let lifecycle = figcraft_apple_ipad::LifecycleHost::new(crate::lifecycle::callback(recovery.clone(), cc.egui_ctx.clone()))
                 .map_err(std::io::Error::other)?;
-            Ok(Box::new(Shell { field: String::new(), input: Default::default(), fit_requested: false, smoke, recovery, _lifecycle: lifecycle }))
+            Ok(Box::new(Shell {
+                _clipboard: clipboard,
+                field: String::new(),
+                input: Default::default(),
+                fit_requested: false,
+                smoke,
+                recovery,
+                _lifecycle: lifecycle,
+            }))
         }),
     )?;
     Ok(())

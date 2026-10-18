@@ -530,6 +530,7 @@ pub fn copy_to_clipboard(s: &mut Session, ids: &[NodeId]) -> Result<()> {
     s.clipboard.images = images;
     s.clipboard.bounds = bounds;
     s.clipboard.source_doc = uid;
+    s.clipboard.renew_copy_identity();
     Ok(())
 }
 

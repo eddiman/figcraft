@@ -13,6 +13,7 @@ workspace = true
 log = { workspace = true }
 
 [target.'cfg(target_os = "ios")'.dependencies]
+figcraft-apple-ipad-clipboard = { path = "../../platform/apple-ipad-clipboard" }
 figcraft-apple-ipad = { path = "../../platform/apple-ipad" }
 figcraft-engine = { workspace = true }
 figcraft-recovery = { workspace = true }
@@ -21,8 +22,8 @@ figcraft-ui-egui = { workspace = true }
 figcraft-doc = { workspace = true }
 figcraft-format = { workspace = true }
 figcraft-color = { workspace = true }
-egui = { workspace = true }
-eframe = { workspace = true, features = ["default_fonts", "wgpu"] }
+egui = { workspace = true, features = ["figcraft-ipad-focus", "figcraft-ipad-clipboard"] }
+eframe = { workspace = true, features = ["default_fonts", "wgpu", "figcraft-ipad-clipboard"] }
 image = { workspace = true }
 serde_json = { workspace = true }
 

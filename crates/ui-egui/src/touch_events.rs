@@ -111,7 +111,7 @@ pub struct Normalizer {
     overflow: bool,
 }
 pub(crate) fn external_edit_event(e: &Event) -> bool {
-    matches!(e, Event::Text(_) | Event::Ime(_) | Event::Key { .. } | Event::Paste(_) | Event::Copy | Event::Cut)
+    matches!(e, Event::Text(_) | Event::Ime(_) | Event::Key { .. } | Event::Paste(_) | Event::OwnedPaste(_) | Event::Copy | Event::Cut)
 }
 fn pointer(e: &Event) -> bool {
     matches!(e, Event::PointerMoved(_) | Event::PointerButton { .. } | Event::PointerGone | Event::MouseMoved(_))

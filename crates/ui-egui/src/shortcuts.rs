@@ -108,7 +108,9 @@ pub fn handle(app: &mut FigApp, ctx: &Context, typing: bool) {
     if events.is_empty() {
         return;
     }
-    if events.iter().any(|event| matches!(event, Event::Text(_) | Event::Ime(_) | Event::Key { .. } | Event::Paste(_) | Event::Copy | Event::Cut)) {
+    if events.iter().any(|event| {
+        matches!(event, Event::Text(_) | Event::Ime(_) | Event::Key { .. } | Event::Paste(_) | Event::OwnedPaste(_) | Event::Copy | Event::Cut)
+    }) {
         app.cancel_canvas_pointer();
     }
     let editing = app.session.ds().map(|d| d.text_edit.is_some()).unwrap_or(false);
@@ -117,7 +119,7 @@ pub fn handle(app: &mut FigApp, ctx: &Context, typing: bool) {
         return;
     }
     // An image-only clipboard brings no paste event, just the key: paste from the key then.
-    let paste_event = events.iter().any(|e| matches!(e, Event::Paste(_)));
+    let paste_event = events.iter().any(|e| matches!(e, Event::Paste(_) | Event::OwnedPaste(_)));
     let paste_key = events.iter().any(|e| matches!(e, Event::Key { key: Key::V, pressed: true, repeat: false, modifiers, .. } if modifiers.command && !modifiers.shift && !modifiers.alt));
     if paste_key && !paste_event {
         crate::menus::paste(app, None);
@@ -133,6 +135,7 @@ fn canvas_event(app: &mut FigApp, ctx: &Context, ev: &Event, now: f64) {
         Event::Copy => crate::menus::invoke(app, "edit.copy"),
         Event::Cut => crate::menus::invoke(app, "edit.cut"),
         Event::Paste(text) => crate::menus::paste(app, Some(text)),
+        Event::OwnedPaste(outcome) => crate::menus::paste_owned(app, outcome),
         Event::Key { key, physical_key, pressed: true, modifiers, repeat } if key_event(app, *key, *physical_key, *modifiers, *repeat, now, ctx) => {
             // handled
         }
@@ -150,7 +153,12 @@ pub(crate) struct KeyboardFrame {
 }
 impl KeyboardFrame {
     pub(crate) fn new(events: &[Event]) -> Self {
-        Self { skip_text: false, has_paste: events.iter().any(|e| matches!(e, Event::Paste(_))), fallback_used: false, edited_text: false }
+        Self {
+            skip_text: false,
+            has_paste: events.iter().any(|e| matches!(e, Event::Paste(_) | Event::OwnedPaste(_))),
+            fallback_used: false,
+            edited_text: false,
+        }
     }
     pub(crate) fn event(&mut self, app: &mut FigApp, ctx: &Context, event: &Event, now: f64) {
         app.cancel_canvas_pointer();
@@ -404,6 +412,18 @@ fn text_key_events(app: &mut FigApp, events: &[Event], skip_text: &mut bool) {
                     app.toast(e.to_string());
                 }
             }
+            Event::OwnedPaste(outcome) => {
+                if let egui::PasteOutcome::Content(content) = outcome {
+                    if content.validate().is_ok()
+                        && let Some(text) = &content.text
+                        && let Err(error) = figcraft_engine::textedit::insert(&mut app.session, text)
+                    {
+                        app.toast(error.to_string());
+                    }
+                } else if let egui::PasteOutcome::Failed(error) = outcome {
+                    app.toast(format!("Clipboard paste failed: {error:?}"));
+                }
+            }
             Event::Paste(t) => {
                 // Plain text only: the engine normalises line endings and drops control chars.
                 if let Err(e) = figcraft_engine::textedit::insert(&mut app.session, t) {
@@ -412,9 +432,18 @@ fn text_key_events(app: &mut FigApp, events: &[Event], skip_text: &mut bool) {
             }
             Event::Copy | Event::Cut => {
                 if let Some(text) = figcraft_engine::textedit::selected_text(&app.session).filter(|t| !t.is_empty()) {
-                    app.services.clipboard_set_text(&text);
-                    if matches!(ev, Event::Cut) {
-                        let _ = figcraft_engine::textedit::key(&mut app.session, "Delete", false, false, false);
+                    let result = if app.services.clipboard_requires_confirmation() {
+                        app.services.clipboard_try_set_text(&text)
+                    } else {
+                        app.services.clipboard_set_text(&text);
+                        Ok(())
+                    };
+                    match result {
+                        Ok(()) if matches!(ev, Event::Cut) => {
+                            let _ = figcraft_engine::textedit::key(&mut app.session, "Delete", false, false, false);
+                        }
+                        Ok(()) => {}
+                        Err(error) => app.toast(error),
                     }
                 }
             }
@@ -548,5 +577,181 @@ mod ipad_platform_tests {
             );
         }
         assert_eq!(Platform::current(), if cfg!(any(target_os = "macos", target_os = "ios")) { Platform::Mac } else { Platform::Other });
+    }
+}
+
+#[cfg(test)]
+mod ipad_clipboard_confirmed_tests {
+    use super::*;
+    use crate::Services;
+    use figcraft_doc::NodeId;
+    use figcraft_engine::{Session, textedit};
+    use std::sync::{Arc, Mutex};
+
+    struct Confirmed {
+        result: Result<(), String>,
+        writes: Arc<Mutex<Vec<String>>>,
+    }
+    impl Services for Confirmed {
+        fn clipboard_requires_confirmation(&self) -> bool {
+            true
+        }
+        fn clipboard_try_set_text(&mut self, text: &str) -> Result<(), String> {
+            self.writes.lock().unwrap().push(text.to_owned());
+            self.result.clone()
+        }
+        fn clipboard_set_text(&mut self, _: &str) {
+            panic!("confirmed writer cannot use legacy output");
+        }
+    }
+    fn app(result: Result<(), String>, editing: bool) -> (FigApp, NodeId, Arc<Mutex<Vec<String>>>) {
+        let mut session = Session::new();
+        let id = NodeId(session.execute("text.create", &json!({"text":"Åbc","x":0,"y":0})).unwrap()["id"].as_u64().unwrap());
+        if editing {
+            textedit::begin(&mut session, id, None, false).unwrap();
+        }
+        let writes = Arc::new(Mutex::new(Vec::new()));
+        let app = FigApp::new(session, Box::new(Confirmed { result, writes: writes.clone() }));
+        (app, id, writes)
+    }
+    #[test]
+    fn ipad_clipboard_text_cut_denial_preserves_engine_state() {
+        for error in ["denied", "unavailable", "too large"] {
+            let (mut app, _, writes) = app(Err(error.into()), true);
+            let before = app.session.ds().unwrap().clone();
+            text_key_events(&mut app, &[Event::Cut], &mut false);
+            let after = app.session.ds().unwrap();
+            assert_eq!(after.doc, before.doc);
+            assert_eq!(after.text_edit, before.text_edit);
+            assert_eq!(after.selection, before.selection);
+            assert_eq!(app.session.undo_depth(), (before.history.undo.len(), before.history.redo.len()));
+            assert_eq!(*writes.lock().unwrap(), vec!["Åbc"]);
+            assert_eq!(app.ui.toast.as_ref().map(|t| t.0.as_str()), Some(error));
+        }
+    }
+    #[test]
+    fn ipad_clipboard_text_cut_success_deletes_after_one_write() {
+        let (mut app, id, writes) = app(Ok(()), true);
+        text_key_events(&mut app, &[Event::Cut], &mut false);
+        assert_eq!(app.session.doc().unwrap().node(id).unwrap().kind.text().unwrap().characters, "");
+        assert_eq!(*writes.lock().unwrap(), vec!["Åbc"]);
+    }
+    #[test]
+    fn ipad_clipboard_layer_failure_preserves_older_copy() {
+        for command in ["edit.copy", "edit.cut"] {
+            let (mut app, id, writes) = app(Err("denied".into()), false);
+            app.session.execute("select.set", &json!({"ids":[id]})).unwrap();
+            app.session.execute("edit.copy", &json!({})).unwrap();
+            let other = app.session.execute("shape.rectangle", &json!({"x":10,"y":10,"width":20,"height":20})).unwrap();
+            app.session.execute("select.set", &json!({"ids":[other["id"]]})).unwrap();
+            app.ui.last_copy = Some("older marker".into());
+            let before = app.session.ds().unwrap().clone();
+            let old = app.session.clipboard.clone();
+            crate::menus::invoke(&mut app, command);
+            let after = app.session.ds().unwrap();
+            assert_eq!(after.doc, before.doc);
+            assert_eq!(after.selection, before.selection);
+            assert_eq!(app.session.undo_depth(), (before.history.undo.len(), before.history.redo.len()));
+            let clip = &app.session.clipboard;
+            assert_eq!(clip.nodes, old.nodes);
+            assert_eq!(clip.images, old.images);
+            assert_eq!(clip.props, old.props);
+            assert_eq!(clip.bounds, old.bounds);
+            assert_eq!(clip.source_doc, old.source_doc);
+            assert_eq!(clip.source, old.source);
+            assert_eq!(clip.source_path, old.source_path);
+            assert_eq!(app.ui.last_copy.as_deref(), Some("older marker"));
+            assert_eq!(writes.lock().unwrap().len(), 1);
+            assert_eq!(app.ui.toast.as_ref().map(|t| t.0.as_str()), Some("denied"));
+        }
+    }
+    #[test]
+    fn ipad_clipboard_layer_cut_success_records_matching_copy() {
+        let (mut app, id, writes) = app(Ok(()), false);
+        app.session.execute("select.set", &json!({"ids":[id]})).unwrap();
+        let undo = app.session.undo_depth().0;
+        crate::menus::invoke(&mut app, "edit.cut");
+        assert!(app.session.doc().unwrap().node(id).is_none());
+        assert_eq!(app.session.undo_depth().0, undo + 1);
+        let writes = writes.lock().unwrap();
+        assert_eq!(writes.len(), 1);
+        assert_eq!(app.ui.last_copy.as_ref(), writes.first());
+        assert!(!app.session.clipboard.nodes.is_empty());
+    }
+    #[test]
+    fn ipad_clipboard_confirmation_default_fails_closed() {
+        struct Missing;
+        impl Services for Missing {
+            fn clipboard_requires_confirmation(&self) -> bool {
+                true
+            }
+        }
+        let (mut app, _, _) = app(Ok(()), true);
+        app.services = Box::new(Missing);
+        let before = app.session.doc().unwrap().clone();
+        text_key_events(&mut app, &[Event::Cut], &mut false);
+        assert_eq!(app.session.doc().unwrap(), &before);
+        assert_eq!(app.ui.toast.as_ref().map(|t| t.0.as_str()), Some("Clipboard is unavailable"));
+    }
+}
+
+#[cfg(test)]
+mod ipad_owned_paste_tests {
+    use super::*;
+    use crate::Services;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    struct NoFallback;
+    impl Services for NoFallback {
+        fn clipboard_requires_confirmation(&self) -> bool {
+            true
+        }
+        fn clipboard_get_text(&mut self) -> Option<String> {
+            panic!("owned Paste cannot reread text");
+        }
+        fn clipboard_get_image(&mut self) -> Option<(u32, u32, Vec<u8>)> {
+            panic!("owned Paste cannot reread image");
+        }
+    }
+    #[test]
+    fn ipad_clipboard_paste_once_and_failure_preserves_older_layers() {
+        let mut app = FigApp::new(figcraft_engine::Session::new(), Box::new(NoFallback));
+        app.run("shape.rectangle", json!({"x":0,"y":0,"width":10,"height":10}));
+        app.run("edit.copy", json!({}));
+        let before = app.session.ds().unwrap().clone();
+        for outcome in [egui::PasteOutcome::Empty, egui::PasteOutcome::Unsupported, egui::PasteOutcome::Failed(egui::PasteError::Denied)] {
+            crate::menus::paste_owned(&mut app, &outcome);
+            assert_eq!(app.session.ds().unwrap().doc, before.doc);
+            assert_eq!(app.session.ds().unwrap().selection, before.selection);
+            assert_eq!(app.session.undo_depth(), (before.history.undo.len(), before.history.redo.len()));
+        }
+        let text = egui::PasteOutcome::Content(egui::PasteContent { text: Some("external text".into()), image: None, identity: None });
+        let ctx = Context::default();
+        let mut batch = KeyboardFrame::new(&[Event::OwnedPaste(text.clone()), Event::OwnedPaste(text.clone())]);
+        batch.event(&mut app, &ctx, &Event::OwnedPaste(text.clone()), 0.0);
+        batch.event(&mut app, &ctx, &Event::OwnedPaste(text), 0.0);
+        let texts = app.session.doc().unwrap().nodes().filter(|n| n.kind.text().is_some_and(|t| t.characters == "external text")).count();
+        assert_eq!(texts, 2);
+    }
+    #[test]
+    fn ipad_menu_paste_requests_one_owned_outcome() {
+        struct Menu(Arc<AtomicUsize>);
+        impl Services for Menu {
+            fn clipboard_requires_confirmation(&self) -> bool {
+                true
+            }
+            fn clipboard_read_owned(&mut self) -> Option<egui::PasteOutcome> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Some(egui::PasteOutcome::Failed(egui::PasteError::Unavailable))
+            }
+        }
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut app = FigApp::new(figcraft_engine::Session::new(), Box::new(Menu(calls.clone())));
+        let before = app.session.doc().unwrap().clone();
+        crate::menus::invoke(&mut app, "edit.paste");
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(app.session.doc().unwrap(), &before);
     }
 }

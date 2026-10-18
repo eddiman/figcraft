@@ -15,6 +15,7 @@ pub mod branch_ui;
 pub mod canvas;
 mod canvas_pointer;
 pub mod cjk;
+mod clipboard_identity;
 pub mod colorpicker;
 pub mod comments;
 pub mod component_panel;
@@ -216,6 +217,21 @@ pub trait Services {
     /// A folder to write several files into.
     fn pick_folder(&mut self, _title: &str) -> Option<PathBuf> {
         None
+    }
+    /// Whether text copy/cut requires a confirmed write before mutation.
+    fn clipboard_requires_confirmation(&self) -> bool {
+        false
+    }
+    /// An explicit native Paste request, with no fallback board read.
+    fn clipboard_read_owned(&mut self) -> Option<egui::PasteOutcome> {
+        None
+    }
+    /// Synchronous confirmed write; unsupported adapters fail explicitly.
+    fn clipboard_try_set_layers(&mut self, text: &str) -> Result<Option<egui::PasteIdentity>, String> {
+        self.clipboard_try_set_text(text).map(|()| None)
+    }
+    fn clipboard_try_set_text(&mut self, _s: &str) -> Result<(), String> {
+        Err("Clipboard is unavailable".into())
     }
     fn clipboard_set_text(&mut self, _s: &str) {}
     fn clipboard_get_text(&mut self) -> Option<String> {
@@ -433,6 +449,7 @@ pub struct UiState {
     /// What FigCraft last put on the system clipboard: when the clipboard still holds it, a paste
     /// uses our copied layers; anything else there (an image, SVG, text) came from another app.
     pub last_copy: Option<String>,
+    pub(crate) native_copy: Option<clipboard_identity::Association>,
     /// When (UI clock, seconds) open documents next get an autosave checkpoint.
     pub next_autosave: f64,
     /// The Assets panel shows the libraries view (publish this file, enabled libraries).
@@ -518,6 +535,7 @@ impl Default for UiState {
             dev: dev_mode::DevUi::default(),
 
             last_copy: None,
+            native_copy: None,
             next_autosave: 0.0,
             libraries: false,
             nav: a11y::Nav::default(),

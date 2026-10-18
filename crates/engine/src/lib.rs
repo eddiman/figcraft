@@ -655,6 +655,8 @@ pub struct UiRequest {
 /// Clipboard contents (internal; the UI mirrors to the system clipboard).
 #[derive(Clone, Debug, Default)]
 pub struct Clipboard {
+    /// Process-local copy identity; clones retain it, a successful layer copy replaces it.
+    copy_identity: Arc<()>,
     /// Copied subtrees: (root, nodes) in z-order.
     pub nodes: Vec<(NodeId, Vec<figcraft_doc::Node>)>,
     pub images: std::collections::BTreeMap<String, figcraft_doc::ImageData>,
@@ -666,6 +668,17 @@ pub struct Clipboard {
     /// The document copied from (pastes into other files follow its mains) and its file path.
     pub source: Option<Arc<Document>>,
     pub source_path: Option<String>,
+}
+
+impl Clipboard {
+    /// Whether these snapshots originate from the same layer-copy operation.
+    pub fn same_copy_operation(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.copy_identity, &other.copy_identity)
+    }
+
+    pub(crate) fn renew_copy_identity(&mut self) {
+        self.copy_identity = Arc::new(());
+    }
 }
 
 /// The editing session: open documents, the current tool, clipboard and prefs.
