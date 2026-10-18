@@ -8,7 +8,7 @@ publish = false
 [target.'cfg(target_os = "ios")'.dependencies]
 objc2 = "=0.6.5"
 objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSArray", "NSEnumerator", "NSString", "NSURL", "NSObject", "NSFileCoordinator", "NSFilePresenter", "NSError", "NSPathUtilities", "NSNotification", "NSOperation", "NSTimer", "NSDate", "NSRunLoop", "block2"] }
-objc2-ui-kit = { version = "=0.3.2", default-features = false, features = ["std", "UIApplication", "UIWindow", "UIView", "UIViewController", "UIDocumentPickerViewController", "UIResponder", "UIScene", "UISceneDefinitions", "UIPresentationController", "UIWindowScene", "block2", "objc2-uniform-type-identifiers"] }
+objc2-ui-kit = { version = "=0.3.2", default-features = false, features = ["std", "UIApplication", "UIWindow", "UIView", "UIViewController", "UIDocumentPickerViewController", "UIResponder", "UIScene", "UISceneDefinitions", "UIPresentationController", "UIWindowScene", "UIKeyboardLayoutGuide", "UILayoutGuide", "UITrackingLayoutGuide", "block2", "objc2-core-foundation", "objc2-uniform-type-identifiers"] }
 objc2-uniform-type-identifiers = { version = "=0.3.2", default-features = false, features = ["std", "UTType"] }
 block2 = "=0.6.2"
 

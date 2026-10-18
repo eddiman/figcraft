@@ -15,3 +15,20 @@ Simulator evidence does not qualify physical lifecycle or third-party providers.
 LifecycleHost retains main-thread notification observers, a polling timer and one bounded UIKit background task. The safe lifecycle module defines checkpoint requests, progress and terminal events. WillResignActive and DidEnterBackground start checkpoint capture and polling with a fixed five-second deadline. DidBecomeActive ends the current lease and requests foreground work. WillTerminate requests a nonblocking best-effort checkpoint. eframe/winit continue to own the event loop and graphics lifecycle.
 
 Native blocks capture numeric owner and cycle IDs. Expiration ends the native lease immediately, including during a reentrant Rust callback; completion notices wait until the active callback returns. Host destruction removes observers, invalidates the timer and ends the remaining task. Workers and completed recovery files remain owned by the shared recovery package after a deadline or host drop. This does not guarantee another callback or a completed write before process termination.
+
+## Keyboard geometry (T19)
+
+`keyboard_bounds()` is a synchronous main-thread value query for the
+foreground key window's root-view `UIKeyboardLayoutGuide`. It enables undocked
+tracking and disables `usesBottomSafeArea` at the existing iOS 17 deployment
+floor, converts the layout frame into window points and returns finite owned
+numeric bounds. A nonpositive guide is `None`; missing foreground geometry is
+an explicit error. Callers must convert window points to their UI coordinate
+scale and must not treat errors as a hidden keyboard.
+
+`src/geometry.rs` uses safe typed UIKit methods and has no unsafe-code exception,
+retained native state, callback or event-loop ownership. The UIKit features
+explicitly include `objc2-core-foundation` so isolated bridge checks do not rely
+on feature unification with the app. T19 simulator keyboard/rotation attempts
+did not pass; compilation and supplied-geometry screenshots do not qualify
+native keyboard avoidance or floating/split keyboard behavior.
