@@ -1,5 +1,11 @@
 # FigCraft Roadmap
 
+Local iPad text diagnostics, 2026-10-19: T20 adds Unicode, marked-text,
+replacement, paste/undo and numeric-field ownership regressions. Native
+simulator fields accept accent/emoji strings, but canvas typing lacks native
+keyboard focus in both optional-no-font and validated-font builds. D20 records
+the reproduction and remediation boundary. T20 is blocked; T32 is undecided.
+
 Local iPad integration preparation, 2026-10-19: T24 now records the integrated
 baseline, toolchain/font/dependency pins, ten patch intents and compatibility
 limits. The baseline remains an ancestor; 64 existing baseline files are

@@ -204,6 +204,24 @@ fn click(u: &mut Ui, p: Pos2) {
     u.frame(vec![]);
 }
 
+#[test]
+fn ipad_text_numeric_field_owns_composition_and_undo() {
+    let (mut u, a, _) = setup();
+    let nodes = u.app.session.doc().unwrap().nodes().count();
+    let undo = undo_steps(&u);
+    let (p, _) = field(&mut u, "Width");
+    click(&mut u, p);
+    u.frame(vec![Event::Ime(egui::ImeEvent::Preedit { text: "17".into(), active_range_chars: Some(0..2) })]);
+    assert_eq!(geom(&u, a).2, 40.0);
+    u.frame(vec![Event::Ime(egui::ImeEvent::Commit("17.5".into()))]);
+    key(&mut u, Key::Enter, Modifiers::NONE);
+    assert_eq!(geom(&u, a).2, 17.5);
+    assert_eq!(u.app.session.doc().unwrap().nodes().count(), nodes, "field input must not create canvas text");
+    assert_eq!(undo_steps(&u), undo + 1);
+    u.app.session.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(geom(&u, a).2, 40.0);
+}
+
 /// Click into field `name`, type `text` over what it shows and press `end`.
 fn type_into(u: &mut Ui, name: &str, text: &str, end: Key) {
     let (p, _) = field(u, name);

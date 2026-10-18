@@ -1,5 +1,19 @@
 # Local iPad port development log
 
+## 2026-10-19: T20 separate field and canvas diagnostics
+
+Three shared tests cover Unicode/emoji selection replacement, combining/CJK
+multiline paste, composition/commit, one-session undo and numeric-field focus.
+Full CI passes 2,583/0/10. An initial composition assertion was corrected to
+the existing engine selection-removal behavior; production text semantics
+are unchanged. Native simulator fields accept Latin, accent and emoji strings.
+Native canvas typing fails before delivery because XCTest finds no keyboard
+focus, despite a visible new text caret. The same two-pass/one-fail result with
+existing validated fonts excludes font absence as the sole explanation.
+D20 revision 0 records the reproduction without approving a replacement
+adapter. T20 remains blocked on native focus diagnosis and physical evidence;
+T32 is undecided. T23 qualification was not repeated.
+
 ## 2026-10-19: T24 patch register and compatibility preparation
 
 Added maintenance/upstream.toml, maintenance/patches.md and

@@ -5,6 +5,11 @@ is `102404e8c3d23d86c3490c1a6beff3202bb73e25`; it remains an ancestor.
 The corresponding [version record](upstream.toml) is a snapshot, not a claim
 that a newer upstream revision was merged or qualified.
 
+Subsequent T20 diagnostics add shared Unicode/composition/field regressions.
+Native fields accept accent/emoji strings; native canvas keyboard focus still
+fails with and without validated fonts. See [D20](../docs/ipad/execution/decisions/D20-text-input.md).
+This does not retire IPAD-004 or decide that a native adapter is unnecessary.
+
 No upstream proposal is recorded for these changes. The fork's existing PR is
 not an upstream acceptance. Do not resolve conflicts with blanket ours/theirs,
 reset upstream ancestry, or remove patches solely because a merge is clean.
