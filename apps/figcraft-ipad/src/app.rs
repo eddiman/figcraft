@@ -74,6 +74,9 @@ impl eframe::App for Shell {
             }
             let completed = figcraft_ui_egui::windows::guard(fig, &ctx, |fig| fig.ui(ui));
             self.input.finish_frame(fig, &ctx, completed);
+            if completed {
+                fig.services.save_prefs(&fig.session.prefs);
+            }
             crate::recovery::try_with(&self.recovery, |coordinator| {
                 if let Some(wait) = coordinator.tick(&fig.session, ctx.input(|i| i.time)) {
                     ctx.request_repaint_after(std::time::Duration::try_from_secs_f64(wait).unwrap_or(std::time::Duration::from_millis(50)));
@@ -107,7 +110,8 @@ pub fn run() -> Result<(), Box<dyn Error>> {
         }
     }
     let recovery = std::sync::Arc::new(std::sync::Mutex::new(coordinator));
-    let mut fig = FigApp::new(session, Box::new(IPadServices::new(recovery.clone())?));
+    let services = IPadServices::new(recovery.clone(), &mut session)?;
+    let mut fig = FigApp::new(session, Box::new(services));
     if restored > 0 {
         fig.toast("Recovered your unsaved work.");
     }

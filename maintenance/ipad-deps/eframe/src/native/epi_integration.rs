@@ -279,7 +279,47 @@ impl EpiIntegration {
         viewport_ui_cb: Option<&DeferredViewportUiCallback>,
         raw_input: egui::RawInput,
     ) -> egui::FullOutput {
-        let raw_input = self.prepare_raw_input(app, raw_input);
+        let mut raw_input = self.prepare_raw_input(raw_input);
+
+        #[cfg(all(any(target_os = "ios", test), feature = "figcraft-ipad-focus"))]
+        let batch_limit = egui::RawInput::MAX_ORDERED_INPUT_BATCHES;
+        #[cfg(not(all(any(target_os = "ios", test), feature = "figcraft-ipad-focus")))]
+        let batch_limit = 1;
+
+        for _ in 0..batch_limit {
+            #[cfg(all(any(target_os = "ios", test), feature = "figcraft-ipad-focus"))]
+            let batch = raw_input.take_ordered_input();
+            #[cfg(not(all(any(target_os = "ios", test), feature = "figcraft-ipad-focus")))]
+            let batch = raw_input.take();
+
+            let output = self.update_input_batch(app, viewport_ui_cb, batch);
+            self.pending_full_output.append(output);
+            if raw_input.events.is_empty() || self.close {
+                break;
+            }
+        }
+
+        if !raw_input.events.is_empty() && !self.close {
+            self.pending_raw_input = raw_input;
+            self.egui_ctx.request_repaint();
+            if let Some(output) = self
+                .pending_full_output
+                .viewport_output
+                .get_mut(&self.egui_ctx.viewport_id())
+            {
+                output.repaint_delay = core::time::Duration::ZERO;
+            }
+        }
+        core::mem::take(&mut self.pending_full_output)
+    }
+
+    fn update_input_batch(
+        &mut self,
+        app: &mut dyn epi::App,
+        viewport_ui_cb: Option<&DeferredViewportUiCallback>,
+        mut raw_input: egui::RawInput,
+    ) -> egui::FullOutput {
+        app.raw_input_hook(&self.egui_ctx, &mut raw_input);
 
         let close_requested = raw_input.viewport().close_requested();
 
@@ -309,8 +349,7 @@ impl EpiIntegration {
             self.handle_close_request(canceled);
         }
 
-        self.pending_full_output.append(full_output);
-        core::mem::take(&mut self.pending_full_output)
+        full_output
     }
 
     /// Let the app tick its logic without showing any ui,
@@ -325,7 +364,15 @@ impl EpiIntegration {
         app: &mut dyn epi::App,
         raw_input: egui::RawInput,
     ) -> egui::LogicOutput {
-        let raw_input = self.prepare_raw_input(app, raw_input);
+        let raw_input = self.prepare_raw_input(raw_input);
+        // Native normalization can edit the canvas. Retain untouched input
+        // while hidden instead of normalizing it again on the next visible pass.
+        #[cfg(not(all(any(target_os = "ios", test), feature = "figcraft-ipad-focus")))]
+        let raw_input = {
+            let mut raw_input = raw_input;
+            app.raw_input_hook(&self.egui_ctx, &mut raw_input);
+            raw_input
+        };
 
         let close_requested = raw_input.viewport().close_requested();
 
@@ -348,18 +395,12 @@ impl EpiIntegration {
         logic_output
     }
 
-    /// Prepend any input we couldn't give to egui earlier, set the time, and run the app hook.
-    fn prepare_raw_input(
-        &mut self,
-        app: &mut dyn epi::App,
-        new_input: egui::RawInput,
-    ) -> egui::RawInput {
+    /// Prepend any input we couldn't give to egui earlier and set the time.
+    fn prepare_raw_input(&mut self, new_input: egui::RawInput) -> egui::RawInput {
         let mut raw_input = core::mem::take(&mut self.pending_raw_input);
         raw_input.append(new_input); // The new input wins where they overlap
 
         raw_input.time = Some(self.beginning.elapsed().as_secs_f64());
-
-        app.raw_input_hook(&self.egui_ctx, &mut raw_input);
 
         raw_input
     }
@@ -462,6 +503,12 @@ pub fn load_egui_memory(_storage: Option<&dyn epi::Storage>) -> Option<egui::Mem
     {
         epi::get_value(_storage?, STORAGE_EGUI_MEMORY_KEY)
     }
+
     #[cfg(not(feature = "persistence"))]
     None
 }
+
+#[cfg(all(test, feature = "figcraft-ipad-focus"))]
+#[expect(clippy::unwrap_used)]
+#[path = "epi_integration_tests.rs"]
+mod tests;

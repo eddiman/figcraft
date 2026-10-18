@@ -54,7 +54,8 @@ pub fn tab_bar(app: &mut FigApp, ui: &mut Ui) {
         let several = !ui.ctx().embed_viewports();
         for (i, d) in app.session.docs.iter().enumerate().filter(|(_, d)| app.shows(d.uid)) {
             let active = i == app.session.active && !app.ui.home;
-            let name = d.doc.name.clone();
+            let saving = app.owned_save_pending(d.branch_of.as_ref().map_or(d.uid, |(uid, _)| *uid));
+            let name = if saving { trf("{name} (Saving...)", &[("name", &d.doc.name)]) } else { d.doc.name.clone() };
             // In a live session: a mark after the name says whether others get in.
             let live = live_mark(app, d.uid);
             let mark_w = if live.is_some() { 18.0 } else { 0.0 };
@@ -84,7 +85,7 @@ pub fn tab_bar(app: &mut FigApp, ui: &mut Ui) {
                 Some(false) => trf("{name}, online, open only to you", &[("name", &name)]),
                 None => name.clone(),
             };
-            let resp = if live.is_some() { resp.on_hover_text(&label) } else { resp };
+            let resp = if live.is_some() || saving { resp.on_hover_text(&label) } else { resp };
             crate::a11y::tab(&resp, &label, active);
             if active {
                 ui.painter().rect_filled(r, CornerRadius::ZERO, t.tab_active);

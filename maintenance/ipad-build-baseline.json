@@ -1,5 +1,27 @@
 {
   "schema_version": 1,
+  "ipad_ci_configuration": {
+    "recorded_date": "2026-10-18",
+    "workflow": ".github/workflows/ipad-ci.yml",
+    "runner": "macos-15 (arm64 required)",
+    "rust": "1.98.1",
+    "xcode": "26.3 (17C529)",
+    "sdk": "26.2",
+    "deployment_floor": "17.0",
+    "targets": ["aarch64-apple-ios", "aarch64-apple-ios-sim"],
+    "signing": "No device signing or release credentials; simulator ad hoc signatures only",
+    "simulator_command": "packaging/ipad/test.sh simulator",
+    "remote_execution": "Not run; authorized downstream fork is eddiman/figcraft",
+    "runner_inventory_source": "https://github.com/actions/runner-images/blob/main/images/macos/macos-15-arm64-Readme.md",
+    "original_baseline_preserved_below": true
+  },
+  "fork_configuration": {
+    "recorded_date": "2026-10-18",
+    "origin": "https://github.com/eddiman/figcraft.git",
+    "upstream": "https://github.com/storytold/figcraft.git",
+    "branch": "ipad/baseline-fixtures",
+    "push_policy": "User authorized committing current checkout changes and pushing the iPad branch to origin. Do not push to upstream."
+  },
   "observed_date": "2026-10-15",
   "repository_path": "/Users/edvardpiresbjorgen/Documents/Codex/2026-10-15/https-github-com-storytold-figcraft-is/upstream-source",
   "upstream_commit": "102404e8c3d23d86c3490c1a6beff3202bb73e25",

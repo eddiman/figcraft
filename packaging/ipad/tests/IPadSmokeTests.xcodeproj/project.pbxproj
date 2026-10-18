@@ -1,0 +1,21 @@
+// !$*UTF8*$!
+{
+ archiveVersion = 1;
+ classes = {};
+ objectVersion = 56;
+ objects = {
+  B10000000000000000000001 = { isa = PBXProject; attributes = { LastUpgradeCheck = 2600; }; buildConfigurationList = B10000000000000000000002; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base); mainGroup = B10000000000000000000003; productRefGroup = B10000000000000000000004; projectDirPath = ""; projectRoot = ""; targets = (B10000000000000000000005); };
+  B10000000000000000000002 = { isa = XCConfigurationList; buildConfigurations = (B10000000000000000000010); defaultConfigurationIsVisible = 0; defaultConfigurationName = Debug; };
+  B10000000000000000000003 = { isa = PBXGroup; children = (B10000000000000000000009, B10000000000000000000004); sourceTree = "<group>"; };
+  B10000000000000000000004 = { isa = PBXGroup; children = (B10000000000000000000006); name = Products; sourceTree = "<group>"; };
+  B10000000000000000000005 = { isa = PBXNativeTarget; buildConfigurationList = B10000000000000000000007; buildPhases = (B10000000000000000000008); buildRules = (); dependencies = (); name = IPadSmokeTests; productName = IPadSmokeTests; productReference = B10000000000000000000006; productType = "com.apple.product-type.bundle.ui-testing"; };
+  B10000000000000000000006 = { isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = IPadSmokeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+  B10000000000000000000007 = { isa = XCConfigurationList; buildConfigurations = (B10000000000000000000011); defaultConfigurationIsVisible = 0; defaultConfigurationName = Debug; };
+  B10000000000000000000008 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (B10000000000000000000012); runOnlyForDeploymentPostprocessing = 0; };
+  B10000000000000000000009 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPadSmokeTests.swift; sourceTree = "<group>"; };
+  B10000000000000000000010 = { isa = XCBuildConfiguration; buildSettings = {}; name = Debug; };
+  B10000000000000000000011 = { isa = XCBuildConfiguration; buildSettings = { ARCHS = arm64; CODE_SIGNING_ALLOWED = NO; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = "org.figcraft.ipad-smoke-tests"; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphonesimulator; SUPPORTED_PLATFORMS = iphonesimulator; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = 2; }; name = Debug; };
+  B10000000000000000000012 = { isa = PBXBuildFile; fileRef = B10000000000000000000009; };
+ };
+ rootObject = B10000000000000000000001;
+}

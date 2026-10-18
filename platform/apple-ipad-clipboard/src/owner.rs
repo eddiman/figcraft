@@ -11,7 +11,7 @@ struct State {
     name: String,
     live: AtomicBool,
 }
-/// Owns only a synthetic named pasteboard, on the creating main thread.
+/// Owns a revocable named or general pasteboard adapter on the creating main thread.
 pub struct NamedHost {
     state: Arc<State>,
     _main_only: PhantomData<Rc<()>>,
@@ -93,6 +93,7 @@ impl NamedWriter {
                 Error::Changed => SnapshotError::Changed,
                 Error::TooLarge => SnapshotError::TooLarge,
                 Error::InvalidToken => SnapshotError::InvalidToken,
+                Error::InvalidImage => SnapshotError::InvalidImage,
                 Error::Panicked => SnapshotError::Panicked,
                 _ => SnapshotError::Unavailable,
             }),

@@ -1440,9 +1440,11 @@ name = "figcraft-apple-ipad-clipboard"
 version = "0.1.0"
 dependencies = [
  "image",
+ "moxcms",
  "objc2 0.6.5",
  "objc2-foundation 0.3.2",
  "objc2-ui-kit 0.3.2",
+ "png",
 ]
 
 [[package]]

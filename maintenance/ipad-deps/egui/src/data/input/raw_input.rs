@@ -142,6 +142,69 @@ impl RawInput {
         }
     }
 
+    /// Maximum native input batches consumed in one redraw.
+    #[cfg(feature = "figcraft-ipad-focus")]
+    pub const MAX_ORDERED_INPUT_BATCHES: usize = 8;
+
+    /// Move the next native input batch without collapsing click or editing owners.
+    ///
+    /// Run the native input hook and a complete UI frame for each returned batch.
+    /// Retain any suffix when the redraw budget is exhausted; never replay it.
+    /// This is opt-in and does not change ordinary [`Self::take`] callers.
+    #[cfg(feature = "figcraft-ipad-focus")]
+    pub fn take_ordered_input(&mut self) -> Self {
+        let mut pointer_seen = false;
+        let mut intent_seen = false;
+        let mut released = false;
+        let mut end = self.events.len();
+        for (index, event) in self.events.iter().enumerate() {
+            let pointer = matches!(
+                event,
+                Event::PointerMoved(_) | Event::PointerButton { .. } | Event::Touch { .. }
+            );
+            let intent = match event {
+                Event::Text(_)
+                | Event::Key { .. }
+                | Event::Paste(_)
+                | Event::Copy
+                | Event::Cut
+                | Event::Ime(_)
+                | Event::ModifiersChanged(_)
+                | Event::WindowFocused(_) => true,
+                #[cfg(feature = "figcraft-ipad-clipboard")]
+                Event::OwnedPaste(_) => true,
+                _ => false,
+            };
+            let next_pointer = matches!(
+                event,
+                Event::PointerMoved(_)
+                    | Event::PointerButton { pressed: true, .. }
+                    | Event::Touch {
+                        phase: super::TouchPhase::Start | super::TouchPhase::Move,
+                        ..
+                    }
+            );
+            if intent_seen || (intent && pointer_seen) || (released && next_pointer) {
+                end = index;
+                break;
+            }
+            pointer_seen |= pointer;
+            intent_seen |= intent;
+            released |= matches!(
+                event,
+                Event::PointerButton { pressed: false, .. }
+                    | Event::Touch {
+                        phase: super::TouchPhase::End | super::TouchPhase::Cancel,
+                        ..
+                    }
+            );
+        }
+        let suffix = self.events.split_off(end);
+        let batch = self.take();
+        self.events = suffix;
+        batch
+    }
+
     /// Add on new input.
     pub fn append(&mut self, newer: Self) {
         let Self {

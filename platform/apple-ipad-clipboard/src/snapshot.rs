@@ -41,21 +41,26 @@ pub struct RgbaImage {
 }
 
 impl RgbaImage {
-    pub fn validate(&self) -> Result<(), SnapshotError> {
-        if self.width == 0 || self.height == 0 {
+    pub(crate) fn byte_len(width: u32, height: u32) -> Result<usize, SnapshotError> {
+        if width == 0 || height == 0 {
             return Err(SnapshotError::InvalidImage);
         }
-        if self.width > IMAGE_AXIS_LIMIT || self.height > IMAGE_AXIS_LIMIT {
+        if width > IMAGE_AXIS_LIMIT || height > IMAGE_AXIS_LIMIT {
             return Err(SnapshotError::TooLarge);
         }
-        let expected = usize::try_from(self.width)
+        let expected = usize::try_from(width)
             .ok()
-            .and_then(|w| usize::try_from(self.height).ok().and_then(|h| w.checked_mul(h)))
+            .and_then(|w| usize::try_from(height).ok().and_then(|h| w.checked_mul(h)))
             .and_then(|pixels| pixels.checked_mul(4))
             .ok_or(SnapshotError::TooLarge)?;
         if expected > IMAGE_LIMIT {
             return Err(SnapshotError::TooLarge);
         }
+        Ok(expected)
+    }
+
+    pub fn validate(&self) -> Result<(), SnapshotError> {
+        let expected = Self::byte_len(self.width, self.height)?;
         if self.bytes.len() != expected {
             return Err(SnapshotError::InvalidImage);
         }

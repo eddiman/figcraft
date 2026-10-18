@@ -208,6 +208,16 @@ pub trait Services {
     /// Deferred adapters retain this notifier and request a frame when a completion arrives.
     fn set_request_repaint(&mut self, _ctx: egui::Context) {}
 
+    fn supports_owned_saves(&self) -> bool {
+        false
+    }
+    fn submit_owned_save(&mut self, _request: platform_requests::OwnedSaveRequest) -> Result<(), String> {
+        Err("Saving owned documents is unavailable".into())
+    }
+    fn take_owned_save_completion(&mut self) -> Option<platform_requests::OwnedSaveCompletion> {
+        None
+    }
+
     fn pick_open(&mut self, _title: &str, _exts: &[&str]) -> Option<PathBuf> {
         None
     }
@@ -218,7 +228,7 @@ pub trait Services {
     fn pick_folder(&mut self, _title: &str) -> Option<PathBuf> {
         None
     }
-    /// Whether text copy/cut requires a confirmed write before mutation.
+    /// Whether native clipboard writes require confirmation before success or mutation.
     fn clipboard_requires_confirmation(&self) -> bool {
         false
     }
@@ -238,6 +248,9 @@ pub trait Services {
         None
     }
     fn clipboard_set_png(&mut self, _w: u32, _h: u32, _rgba: &[u8]) {}
+    fn clipboard_try_set_png(&mut self, _w: u32, _h: u32, _rgba: &[u8]) -> Result<(), String> {
+        Err("Clipboard is unavailable".into())
+    }
     /// An image on the system clipboard as (width, height, straight RGBA).
     fn clipboard_get_image(&mut self) -> Option<(u32, u32, Vec<u8>)> {
         None
@@ -894,6 +907,10 @@ impl FigApp {
 
     pub fn save_as_dialog(&mut self) {
         use platform_requests::{Operation, Payload};
+        if self.services.supports_owned_saves() {
+            self.begin_owned_save(true);
+            return;
+        }
         if !self.desktop_document_write() {
             return;
         }
@@ -913,6 +930,10 @@ impl FigApp {
     }
 
     pub fn save(&mut self) {
+        if self.services.supports_owned_saves() {
+            self.begin_owned_save(false);
+            return;
+        }
         if !self.desktop_document_write() {
             return;
         }

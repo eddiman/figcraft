@@ -1746,6 +1746,11 @@ impl Context {
                     .unwrap_or(Err(Error::Panicked)),
                 None => { self.send_cmd(crate::OutputCommand::CopyText(text)); return Ok(None); },
             };
+            if let Ok(Some(identity)) = &result
+                && identity.validate().is_err()
+            {
+                result = Err(Error::InvalidContent);
+            }
             self.write(|context| {
                 context.text_clipboard_busy = false;
                 if context.text_clipboard_reentered && result.is_ok() { result = Err(Error::Reentrant); }
@@ -1796,14 +1801,29 @@ impl Context {
     #[cfg(feature = "figcraft-ipad-clipboard")]
     pub fn try_copy_rgba(&self, image: crate::PasteImage)->Result<(),crate::TextClipboardError> {
         use crate::TextClipboardError as E;
-        crate::PasteContent{text:None,image:Some(image.clone()),identity:None}.validate().map_err(|_|E::TooLarge)?;
-        let writer=self.write(|c| {
-            if c.text_clipboard_busy {c.text_clipboard_reentered=true;return Err(E::Reentrant);}
-            let writer=c.image_clipboard_writer.clone().ok_or(E::Unavailable)?;
-            c.text_clipboard_busy=true;c.text_clipboard_reentered=false;Ok(writer)
-        })?;
-        let mut result=std::panic::catch_unwind(std::panic::AssertUnwindSafe(||writer(image))).unwrap_or(Err(E::Panicked));
-        self.write(|c|{c.text_clipboard_busy=false;if c.text_clipboard_reentered {result=Err(E::Reentrant);}c.text_clipboard_reentered=false;});
+        let result = image.validate().map_err(|error| {
+            if error == crate::PasteError::TooLarge { E::TooLarge } else { E::InvalidContent }
+        }).and_then(|()| {
+            let writer = self.write(|c| {
+                if c.text_clipboard_busy { c.text_clipboard_reentered = true; return Err(E::Reentrant); }
+                let writer = c.image_clipboard_writer.clone().ok_or(E::Unavailable)?;
+                c.text_clipboard_busy = true;
+                c.text_clipboard_reentered = false;
+                Ok(writer)
+            })?;
+            let mut result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| writer(image))).unwrap_or(Err(E::Panicked));
+            self.write(|c| {
+                c.text_clipboard_busy = false;
+                if c.text_clipboard_reentered && result.is_ok() { result = Err(E::Reentrant); }
+                c.text_clipboard_reentered = false;
+            });
+            result
+        });
+        if let Err(error) = result {
+            self.write(|c| {
+                if c.text_clipboard_errors.len() < 16 { c.text_clipboard_errors.push(error); }
+            });
+        }
         result
     }
 

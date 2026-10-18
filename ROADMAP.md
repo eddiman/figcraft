@@ -1,9 +1,62 @@
 # FigCraft Roadmap
 
+Local iPad automation checkpoint, 2026-10-18: T23 adds an isolated XCTest
+simulator runner and unsigned device/simulator CI configuration. The real
+editor smoke covers field input, a fixture edit and cold restart with the
+edited position retained. Deliberate assertion failure propagates; eight
+runner regressions and both iOS builds pass. Full CI passes 2,568/0/9 after
+native-only cache cleanup resolved a low-disk server-test failure.
+Remote CI remains unverified pending execution in `eddiman/figcraft`; physical qualification
+is unchanged. No shared production code changed, and the full port is unfinished.
+
+Local iPad persistence checkpoint, 2026-10-18: T10 now implements Save/Save As
+through captured snapshots, bounded/coalescing document workers and synchronized
+writes. Acknowledgements drive saved/dirty status and closed-tab recents.
+Simulator Save As, edited Save and persisted-recents reopening after relaunch
+pass, including archive/UI agreement on the edited fixture coordinates.
+Full CI passes 2,568/0/9; app=54/0/0, UI=587/0/1, both iOS checks and simulator
+linking pass. T10 joins T13 in review for remaining physical qualification;
+the full port is unfinished and later dependency gates remain unreleased.
+
+Local T13 canvas batching coverage, 2026-10-18: five new tests combine the
+production input partitioner, Native coordinator and editor, covering redraw
+backlogs, exact undo counts, field ownership and cancellation barriers.
+The app suite passes 42 tests with all-target Clippy. Simulator burst injection
+did not reliably reach the native handler, so native backlog responsiveness
+remains unqualified. This follow-up changes tests only and releases no gate.
+
+Local T13 simulator checkpoint, 2026-10-18: the current production build passes
+observed tap-to-focus, field Select All/Copy/Cut/Paste, Escape to canvas,
+single canvas Paste/Undo and tap-back ownership. One same-process background/
+foreground cycle retains state and accepts subsequent field input. These checks
+do not qualify physical input, permissions, images, actual suspension or input
+backlogs. Evidence is in the external T13 result; no plan gate is released.
+
+Local T13 host-loop checkpoint, 2026-10-18: six new headless regressions exercise
+the actual eframe update loop across redraw limits, hidden/resumed input, output
+merging and close handling. Both native bridge scripts run the suite. Full CI
+passes 2,545 tests with nine ignored; those six excluded-workspace tests pass
+separately. Both app target checks pass. Interactive and physical qualification
+remain open, and no plan gate is released.
+
+Local T13 ordering checkpoint, 2026-10-18: the native host partitions accumulated
+input before egui collapses click ownership. It consumes each event once, runs at
+most eight input batches per redraw, and retains the suffix in its existing
+pending-input buffer. Seven new host regressions cover field and writer ordering,
+Escape, repeated taps, native panel normalization and suffix/metadata preservation.
+Full CI passes 2,545 tests with nine ignored; the latest simulator executable
+renders the synthetic editor. Interactive input, lifecycle/performance and device
+qualification remain open. No plan gate is released.
+
 Local T13 checkpoint, 2026-10-18: owned text/image clipboard and pinned input
-dependency patches are integrated for development. Production qualification is
-incomplete. Workspace formatting/Clippy passed; full CI reported server failures
-and timed out. T13 remains unfinished, with physical checks deferred. See
+dependency patches are integrated for development. The production follow-up fixes
+PNG copy failure reporting, invalid write receipts and bounds RGBA expansion before
+decoding. Tagged clipboard images now convert to sRGB using bounded ICC/PNG
+metadata handling. Ten app-host regressions exercise production field focus and
+callback ownership; the bridge script checks both native crates. Full CI,
+both iOS checks, standalone clipboard checks and linked simulator rendering pass.
+Interactive/device qualification remains incomplete. T10's isolated destination
+coordinator remains test-only until its persistence prerequisites pass. See
 maintenance/ipad-deps/README.md for this checkpoint's scope.
 
 **Stage: alpha** · next: beta, ~26 points and ~162–292 h away (one Opus 5.5 agent; ~33–67 h wall-clock with 5 agents)

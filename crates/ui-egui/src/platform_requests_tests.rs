@@ -17,9 +17,34 @@ struct State {
     cancelled: Vec<RequestId>,
     next: Option<Submission>,
     repaint: Option<egui::Context>,
+    owned: bool,
+    saves: Vec<OwnedSaveRequest>,
+    saved: VecDeque<OwnedSaveCompletion>,
+    save_error: Option<String>,
+    recents: Vec<String>,
 }
 struct Fake(Rc<RefCell<State>>);
 impl Services for Fake {
+    fn capabilities(&self) -> PlatformCapabilities {
+        if self.0.borrow().owned { PlatformCapabilities::ipad() } else { PlatformCapabilities::desktop() }
+    }
+    fn supports_owned_saves(&self) -> bool {
+        self.0.borrow().owned
+    }
+    fn submit_owned_save(&mut self, request: OwnedSaveRequest) -> Result<(), String> {
+        let mut state = self.0.borrow_mut();
+        if let Some(error) = state.save_error.take() {
+            return Err(error);
+        }
+        state.saves.push(request);
+        Ok(())
+    }
+    fn take_owned_save_completion(&mut self) -> Option<OwnedSaveCompletion> {
+        self.0.borrow_mut().saved.pop_front()
+    }
+    fn save_prefs(&mut self, prefs: &figcraft_engine::Prefs) {
+        self.0.borrow_mut().recents.clone_from(&prefs.recent_files);
+    }
     fn submit_request(&mut self, request: PlatformRequest) -> Submission {
         let mut s = self.0.borrow_mut();
         s.submitted.push(request);
@@ -68,6 +93,151 @@ fn complete(state: &Rc<RefCell<State>>, id: RequestId, result: PlatformResult) {
     let mut s = state.borrow_mut();
     s.ready.push_back(Completion { id, result });
     s.repaint.as_ref().unwrap().request_repaint();
+}
+
+fn owned_setup() -> (FigApp, Rc<RefCell<State>>, egui::Context) {
+    let (mut app, state, ctx) = setup();
+    state.borrow_mut().owned = true;
+    app.session.ds_mut().unwrap().path = Some("owned.figcraft".into());
+    app.run("shape.rectangle", json!({})).unwrap();
+    (app, state, ctx)
+}
+
+fn save_done(state: &Rc<RefCell<State>>, index: usize, result: Result<OwnedSaveOutcome, String>) {
+    let mut state = state.borrow_mut();
+    let order = state.saves[index].prepared.identity().write_order();
+    state.saved.push_back(OwnedSaveCompletion { order, result });
+}
+
+#[test]
+fn ipad_owned_save_completes_for_source_without_switching_active_tab() {
+    let (mut app, state, ctx) = owned_setup();
+    let origin = target(&app).uid;
+    app.save();
+    assert!(app.owned_save_pending(origin));
+    assert!(app.session.ds().unwrap().is_dirty());
+    app.run("file.new", json!({})).unwrap();
+    let other = target(&app).uid;
+    save_done(&state, 0, Ok(OwnedSaveOutcome::Saved("owned.figcraft".into())));
+    app.poll_platform_requests(&ctx);
+    assert_eq!(target(&app).uid, other);
+    assert!(!app.session.docs.iter().find(|doc| doc.uid == origin).unwrap().is_dirty());
+    assert!(!app.owned_save_pending(origin));
+    assert_eq!(state.borrow().recents, vec!["owned.figcraft"]);
+    assert!(app.session.ds().unwrap().path.is_none());
+    save_done(&state, 0, Ok(OwnedSaveOutcome::Saved("unrelated.figcraft".into())));
+    app.poll_platform_requests(&ctx);
+    assert_eq!(state.borrow().recents, vec!["owned.figcraft"], "duplicate receipt cannot change paths");
+}
+
+#[test]
+fn ipad_owned_save_preserves_newer_edits_and_defers_during_gesture() {
+    let (mut app, state, ctx) = owned_setup();
+    let uid = target(&app).uid;
+    app.save();
+    app.begin_canvas_pointer(&ctx).unwrap();
+    app.pointer_session(|session| {
+        session.begin_interaction("New drawing")?;
+        session.execute("shape.rectangle", &json!({"x": 100}))?;
+        Ok(())
+    })
+    .unwrap();
+    save_done(&state, 0, Ok(OwnedSaveOutcome::Saved("owned.figcraft".into())));
+    app.poll_platform_requests(&ctx);
+    assert!(app.canvas_pointer.is_some(), "save completion must not cancel the newer drawing");
+    assert!(app.owned_save_pending(uid));
+    app.cancel_canvas_pointer();
+    app.run("shape.rectangle", json!({"x": 200})).unwrap();
+    let current = app.session.doc().unwrap().clone();
+    app.poll_platform_requests(&ctx);
+    assert_eq!(*app.session.doc().unwrap(), current);
+    assert!(app.session.ds().unwrap().is_dirty());
+    assert!(!app.owned_save_pending(uid));
+    assert!(app.ui.last_error.is_none());
+}
+
+#[test]
+fn ipad_owned_save_closed_tab_completion_persists_recents() {
+    let (mut app, state, ctx) = owned_setup();
+    let uid = target(&app).uid;
+    app.save();
+    app.run("file.close", json!({"force": true})).unwrap();
+    assert!(app.owned_save_pending(uid));
+    save_done(&state, 0, Ok(OwnedSaveOutcome::Saved("closed.figcraft".into())));
+    app.poll_platform_requests(&ctx);
+    assert!(app.session.docs.is_empty());
+    assert_eq!(app.session.prefs.recent_files, vec!["closed.figcraft"]);
+    assert_eq!(state.borrow().recents, vec!["closed.figcraft"]);
+    assert!(!app.owned_save_pending(uid));
+}
+
+#[test]
+fn ipad_owned_save_rejection_failure_and_supersession_leave_dirty_state() {
+    let (mut app, state, ctx) = owned_setup();
+    let uid = target(&app).uid;
+    state.borrow_mut().save_error = Some("synthetic admission failure".into());
+    app.save();
+    assert!(!app.owned_save_pending(uid));
+    assert!(app.ui.last_error.as_ref().unwrap().contains("admission"));
+    app.save();
+    save_done(&state, 0, Err("synthetic disk full".into()));
+    app.poll_platform_requests(&ctx);
+    assert!(app.ui.last_error.as_ref().unwrap().contains("disk full"));
+    assert!(app.session.ds().unwrap().is_dirty());
+    assert_eq!(app.session.ds().unwrap().path.as_deref(), Some("owned.figcraft"));
+    app.ui.last_error = None;
+    app.save();
+    save_done(&state, 1, Ok(OwnedSaveOutcome::Superseded));
+    app.poll_platform_requests(&ctx);
+    assert!(app.session.ds().unwrap().is_dirty());
+    assert!(app.ui.last_error.is_none());
+    assert!(!app.owned_save_pending(uid));
+    assert!(app.run("file.save", json!({})).is_none(), "direct engine writes remain blocked");
+}
+
+fn save_dialog_frame(app: &mut FigApp, ctx: &egui::Context, key: Option<egui::Key>) {
+    let events = key
+        .into_iter()
+        .map(|key| egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE })
+        .collect();
+    let mut output = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| app.poll_platform_requests(ui.ctx()));
+    output.textures_delta.clear();
+}
+
+#[test]
+fn ipad_owned_save_as_cancellation_leaves_path_and_content_unchanged() {
+    let (mut app, state, ctx) = owned_setup();
+    let before = app.session.doc().unwrap().clone();
+    app.save_as_dialog();
+    save_dialog_frame(&mut app, &ctx, None);
+    save_dialog_frame(&mut app, &ctx, Some(egui::Key::Escape));
+    assert!(state.borrow().saves.is_empty());
+    assert_eq!(*app.session.doc().unwrap(), before);
+    assert_eq!(app.session.ds().unwrap().path.as_deref(), Some("owned.figcraft"));
+    assert!(app.session.ds().unwrap().is_dirty());
+    app.save();
+    assert_eq!(state.borrow().saves.len(), 1, "Escape dismissed the dialog");
+}
+
+#[test]
+fn ipad_owned_save_as_keeps_activation_capture_until_name_confirmation() {
+    let (mut app, state, ctx) = owned_setup();
+    let captured_count = app.session.doc().unwrap().nodes().count();
+    app.save_as_dialog();
+    save_dialog_frame(&mut app, &ctx, None);
+    app.run("shape.rectangle", json!({"x": 250})).unwrap();
+    save_dialog_frame(&mut app, &ctx, Some(egui::Key::Enter));
+    let state = state.borrow();
+    assert_eq!(state.saves.len(), 1);
+    assert!(matches!(&state.saves[0].destination, OwnedSaveDestination::NewCopy(name) if !name.is_empty()));
+    let bytes = figcraft_engine::persistence::encode_save(&state.saves[0].prepared).unwrap();
+    let stage = StagingLease::create(&std::env::temp_dir()).unwrap();
+    let file = stage.file("activation.figcraft".into()).unwrap();
+    std::fs::write(&file.path, bytes).unwrap();
+    let mut reopened = Session::new();
+    reopened.execute("file.open", &json!({"path": file.path})).unwrap();
+    assert_eq!(reopened.doc().unwrap().nodes().count(), captured_count);
+    assert_eq!(app.session.doc().unwrap().nodes().count(), captured_count + 1);
 }
 
 #[test]

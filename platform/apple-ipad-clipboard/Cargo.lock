@@ -57,13 +57,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "figcraft-t13-pasteboard-probe"
+name = "figcraft-apple-ipad-clipboard"
 version = "0.1.0"
 dependencies = [
  "image",
+ "moxcms",
  "objc2",
  "objc2-foundation",
  "objc2-ui-kit",
+ "png",
 ]
 
 [[package]]

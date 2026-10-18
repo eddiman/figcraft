@@ -13,6 +13,8 @@ pub enum TextClipboardError {
     Denied,
     /// The owned text exceeds the configured size bound.
     TooLarge,
+    /// The image buffer or write receipt is invalid.
+    InvalidContent,
     /// The callback panicked; no deletion should follow this result.
     Panicked,
     /// Another write is already executing in this context.
@@ -24,6 +26,7 @@ impl std::fmt::Display for TextClipboardError {
             Self::Unavailable => "Clipboard is unavailable",
             Self::Denied => "Clipboard write was denied",
             Self::TooLarge => "Clipboard text is too large",
+            Self::InvalidContent => "Clipboard content is invalid",
             Self::Panicked => "Clipboard writer failed",
             Self::Reentrant => "Clipboard writer is already active",
         })

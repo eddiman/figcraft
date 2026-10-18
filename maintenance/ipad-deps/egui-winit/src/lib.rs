@@ -1433,21 +1433,50 @@ fn is_printable_char(chr: char) -> bool {
     !is_in_private_use_area && !chr.is_ascii_control()
 }
 
+#[cfg(all(test, feature = "figcraft-ipad-clipboard"))]
+mod ipad_shortcut_tests;
+
+#[cfg(all(test, not(feature = "figcraft-ipad-clipboard")))]
+#[test]
+fn ipad_host_feature_off_keeps_legacy_clipboard_chords() {
+    let modifiers = egui::Modifiers {
+        command: true,
+        shift: true,
+        alt: true,
+        ..Default::default()
+    };
+    assert!(is_copy_command(modifiers, egui::Key::C));
+    assert!(is_cut_command(modifiers, egui::Key::X));
+    assert!(is_paste_command(modifiers, egui::Key::V));
+}
+
+fn is_command_clipboard_shortcut(
+    modifiers: egui::Modifiers,
+    keycode: egui::Key,
+    shortcut: egui::Key,
+) -> bool {
+    let modified = cfg!(all(
+        any(target_os = "ios", test),
+        feature = "figcraft-ipad-clipboard"
+    )) && (modifiers.shift || modifiers.alt || modifiers.ctrl);
+    modifiers.command && keycode == shortcut && !modified
+}
+
 fn is_cut_command(modifiers: egui::Modifiers, keycode: egui::Key) -> bool {
     keycode == egui::Key::Cut
-        || (modifiers.command && keycode == egui::Key::X)
+        || is_command_clipboard_shortcut(modifiers, keycode, egui::Key::X)
         || (cfg!(target_os = "windows") && modifiers.shift && keycode == egui::Key::Delete)
 }
 
 fn is_copy_command(modifiers: egui::Modifiers, keycode: egui::Key) -> bool {
     keycode == egui::Key::Copy
-        || (modifiers.command && keycode == egui::Key::C)
+        || is_command_clipboard_shortcut(modifiers, keycode, egui::Key::C)
         || (cfg!(target_os = "windows") && modifiers.ctrl && keycode == egui::Key::Insert)
 }
 
 fn is_paste_command(modifiers: egui::Modifiers, keycode: egui::Key) -> bool {
     keycode == egui::Key::Paste
-        || (modifiers.command && keycode == egui::Key::V)
+        || is_command_clipboard_shortcut(modifiers, keycode, egui::Key::V)
         || (cfg!(target_os = "windows") && modifiers.shift && keycode == egui::Key::Insert)
 }
 

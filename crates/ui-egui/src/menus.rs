@@ -150,8 +150,15 @@ pub fn invoke(app: &mut FigApp, id: &str) {
                 // Clipboard images are read as sRGB.
                 figcraft_render::to_srgb(&mut pix, profile);
                 let rgba = figcraft_render::to_rgba8(&pix);
-                app.services.clipboard_set_png(pix.width(), pix.height(), &rgba);
-                app.toast(tr("Copied as PNG"));
+                if app.services.clipboard_requires_confirmation() {
+                    match app.services.clipboard_try_set_png(pix.width(), pix.height(), &rgba) {
+                        Ok(()) => app.toast(tr("Copied as PNG")),
+                        Err(error) => app.toast(error),
+                    }
+                } else {
+                    app.services.clipboard_set_png(pix.width(), pix.height(), &rgba);
+                    app.toast(tr("Copied as PNG"));
+                }
             }
         }
         "edit.copyAsText" => {

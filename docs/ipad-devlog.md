@@ -1,5 +1,240 @@
 # Local iPad port development log
 
+## 2026-10-18: T23 simulator runner and unsigned CI configuration
+
+Continued with simulator/CI work under the user's instruction to choose a task
+without physical-device requirements. T16's existing software integration was
+accepted for T23 development only; hardware and later qualification gates remain.
+
+The new runner selects an available iPad by device type, rejects phones, builds
+the current Rust app and a separate XCTest target, and installs uniquely named
+test apps into isolated containers. Public XCTest input and Vision recognition
+exercise the rendered editor without a new production bridge or command channel.
+It retains result bundles, screenshots, logs and build/destination identities,
+requires nonzero passing tests and propagates failed assertions.
+
+The final workflow checks inspector X=0, types `abc` into the ordinary field,
+observes three characters, invokes the existing smoke edit and checks X=10.
+After termination/relaunch, the field resets and the inspector still shows
+X=10. Screenshots were inspected. A deliberate failure exits 65 and is checked
+separately from unrelated infrastructure failures. Eight host regressions pass.
+Initial harness failures in orientation, OCR targeting and result parsing are
+retained separately; the final assertions do not use the smoke button label as
+evidence of an edit.
+
+The workflow configures standard macOS 15 arm64 jobs with Rust 1.98.1/Xcode 26.3,
+target/SDK/lockfile-aware caching and unsigned device/simulator builds.
+It preserves upstream Linux/wasm jobs and is disabled in the original upstream
+repository. No signing secrets, release environment or production dependencies
+were introduced. Hosted-runner execution remains unverified.
+
+Both locked target checks and linked builds pass. Full CI initially failed
+46 server tests when free space fell below the existing 1 GiB safety threshold.
+Only device-target intermediates were cleared using
+`cargo clean --target-dir target/aarch64-apple-ios`, after preserving the linked
+unsigned app and evidence. The unchanged full suite then passed 2,568 tests,
+zero failures and nine ignored. No safeguard or test was relaxed.
+
+The test apps/runners are removed; the existing development app is restored at
+PID 45520. No clipboard contents or keyboard-capture settings were changed.
+T23 is in review for remote execution; the full port remains unfinished.
+
+## 2026-10-18: T10 local Save/Save As and relaunch reopening
+
+The shared Save actions now opt into a native owned-save Services boundary.
+Prepared snapshots are captured at activation; Save As names a new local copy
+without changing any imported original. One worker encodes/writes, bounds
+outstanding requests to eight and coalesces queued writes per owned directory.
+Successful synchronized replacement alone permits acknowledgement. Newer edits
+stay dirty; closed-tab saves finish and update recents. Completion waits for a
+new canvas gesture to finish rather than cancelling it. Pending tabs indicate
+Saving, and cancellation leaves the path/baseline unchanged.
+
+The isolated simulator app saved a generated document and reopened it from
+persisted recents after relaunch. A canvas drag then moved Fixture image to
+(16, -60); Save replaced the same archive, and another relaunch/reopen displayed
+those exact coordinates. The stored document.json independently agrees.
+The temporary app/bundle were removed, original PID 45520 restored and keyboard
+capture left unchanged. No clipboard operation was used.
+
+Eight new app tests and six shared UI tests cover writes, reopening, queue
+pressure, ordering, failures, cancellation and completion ownership. A paused
+worker test uses actual text editing and verifies the old archive text, newer
+live characters, caret and dirty state independently. App=54,
+UI=587 with one ignored; full CI=2,568 passed, zero failed, nine ignored.
+Host/simulator Clippy, device compile and simulator linking pass. Existing stale
+generated UI catalogs were cleared with a package-scoped Cargo clean before
+the final checks. No production dependency or native FFI boundary changed.
+
+T10 is in review for physical save/reopen/cancellation and filesystem-failure
+qualification. Host destruction before UI completion does not guarantee the
+recents acknowledgement of a drained job. Private owned-directory assumptions
+are retained; this writer is not an external-original editing mechanism.
+The full plan remains unfinished.
+
+## 2026-10-18: T13 accepted for development; T10 owned recents started
+
+The bounded T13 acceptance pass is green and the card moves to review with
+remaining native/device qualification deferred. The user directed moving on;
+T07's development prerequisite for T10 is now explicitly reviewed without
+claiming physical acceptance.
+
+Native startup now resolves owned-copy recents from persistent directory IDs
+and file names instead of saving container prefixes. Completed editor frames
+persist changed recent lists through the native Services adapter. The bounded
+index uses exclusive staging, file sync, rename and parent sync; malformed or
+unsafe references fail explicitly. Four new tests cover relocation, corrupt
+indexes, failure preservation and replaced directories. All 46 app tests,
+host/simulator Clippy, device compile and simulator linking pass.
+
+Save/Save As, bounded document workers and acknowledgement wiring remain the
+next T10 work. This checkpoint persists imported-file recents, not edited files.
+
+## 2026-10-18: Canvas batching regression coverage
+
+Five new app-host tests exercise the ordered-input helper, Native normalizer and
+shared editor together. They cover mouse/touch backlogs across redraws, exact
+node/undo counts, canvas/field-Paste/canvas ownership, focus-loss cancellation and
+the lifecycle cancellation barrier preserving prior work against stale releases.
+All 42 app tests and app all-target Clippy pass. No production code changed.
+The earlier full-CI result remains separate from this package-level checkpoint.
+
+Simulator burst automation was inconclusive: some posted key events never
+reached the native keyboard handler. In the traced attempts, received pressed-A
+counts matched the visible character counts. The app queue was not changed on
+the basis of missing automation delivery. The isolated app was removed and the
+original restored; keyboard capture retained its observed initial value of one.
+Native burst latency, real suspension and physical qualification remain open.
+
+## 2026-10-18: T13 simulator text and focus qualification
+
+The current production simulator executable was rebuilt and exercised in an
+isolated synthetic app container. Observed screenshots establish tap-to-focus,
+physical key delivery, Select All, field Copy/Cut/Paste, Escape transferring
+Paste to the canvas, single canvas Paste/Undo and tap-back field ownership.
+One background/foreground cycle preserved the same PID and field/canvas state;
+subsequent typing succeeded. No production code changed during this check.
+
+Already-authorized public Accessibility/CoreGraphics APIs delivered input.
+Process-targeted physical keys and explicit Command modifier transitions worked;
+HID/Unicode and flags-only shortcut attempts are retained as automation failures.
+Only selected synthetic field text was copied/pasted. The isolated app was
+removed, keyboard capture restored and the original app preserved.
+
+The external T13 result, runtime-focus-observations.json, action log and inspected
+screenshots record outcomes and limitations. Physical input, clipboard images,
+permission/denial, actual suspension, hidden/resumed canvas interactions and
+multiple-click/backlog responsiveness remain unqualified. No gate is released.
+
+## 2026-10-18: T13 actual host-loop regression coverage
+
+Six new tests call the vendored eframe update and logic-only methods using its
+existing headless Frame constructor. They verify that the eight-batch budget
+retains a suffix before newer input and requests another redraw, hidden ticks
+do not run the mutating hook, resumed input is normalized once, hidden ticks
+preserve an existing suffix, per-batch outputs merge in order, and close requests
+are one-shot with accepted/cancelled behavior. The iOS focus path is selected
+under cfg(test) only; shipping desktop behavior and native ownership are unchanged.
+
+The new host-input runner uses the original library source through a temporary
+manifest because Cargo cannot test this excluded dependency from the root
+workspace. It preserves production runtime dependency versions, checks dev-only
+versions against recorded lockfiles, runs offline, rejects zero/insufficient test
+matches and removes its temporary directory. Both bridge check targets invoke
+it. No source manifest or production lockfile is rewritten. The unused inspection
+dependency is omitted only from the temporary test manifest.
+
+Both native bridge scripts and both app target checks pass. Full CI passes
+2,545 tests with nine ignored; the six host-loop tests are separate from that
+workspace count. Native bridge suites pass eight and eleven tests respectively.
+Strict standalone eframe Clippy exposed existing documentation, type-complexity
+and unfulfilled-expectation warnings, plus a removed lint. These are retained
+and printed by the runner; diagnostics in the changed host/test files fail it.
+The new tests and host code have no remaining diagnostics.
+
+An initial full CI run failed the server's real low-disk guard with less than
+1 GiB free. Scoped Cargo cleanup of egui/egui-winit/eframe artifacts freed 1.2 GiB;
+the full rerun passes without changing the guard or server code. Failed logs are
+retained in the external T13 evidence. Interactive responsiveness, real hidden/
+resumed canvas behavior and physical qualification remain open. No gate is released.
+
+## 2026-10-18: T13 ordered native input batches
+
+The production reproducer sent `tap B, Paste q, tap A, Paste r` while A held
+focus. egui delivered both values to A because its interaction snapshot retained
+only the final click. A widget-only patch would also leave cross-field Copy/Cut
+callbacks ordered by widget draw order.
+
+The iOS-only eframe focus opt-in now partitions raw input before the existing
+Native normalizer and UI pass. Pointer batches end before another click owner;
+each editing, modifier or focus intent gets its own batch. Each batch completes
+the existing hook/UI/finish-frame cycle. FullOutput::append merges outputs.
+At most eight batches run per redraw; an unconsumed suffix stays in the existing
+pending-input buffer, ahead of newer input. Hidden logic-only updates retain
+unnormalized input so a canvas edit cannot run twice on resume. There is no new
+responder, native owner or clipboard read.
+
+Seven regressions use the production partition helper and verify both widget
+orders, cross-field Copy/Cut callback order, Escape, repeated-click selection,
+the actual Native panel normalizer, retained suffixes and one-shot metadata.
+Full CI passes 2,545 tests with nine ignored, including 37 app-host tests. Device
+compile, simulator Clippy/linking and the standalone focus-without-clipboard
+build pass. A separately installed copy of the executable rendered the synthetic
+editor; it was removed and the original simulator app restored.
+
+Raw egui callers which bypass the native batching API retain aggregate behavior.
+Interactive keyboard/clipboard, input backlog responsiveness, hidden/resumed
+canvas interactions and physical devices remain unqualified. See D13 and
+results/T13.md in the external execution plan. No task gate is released.
+
+## 2026-10-18: T13 color normalization and production callback regressions
+
+The clipboard image boundary converts supported PNG/JPEG RGB and grayscale ICC
+profiles to straight sRGB RGBA, preserving alpha. PNG gamma/primaries and SDR
+sRGB/Display P3 cICP are handled; unsupported HDR and malformed/discarded metadata
+fail explicitly. The conversion uses the existing pinned moxcms/png libraries
+directly, without depending on the renderer or changing their versions. RGB
+conversion uses a 4 KiB scratch buffer instead of another full-size image.
+
+Production dependency tests reproduced acceptance of an invalid write receipt:
+the earlier isolated repair had not been adopted. Context now validates receipts
+before reporting success, so a failed field Cut keeps text and selection. Image
+validation avoids a full-buffer clone, distinguishes malformed content from size
+limits, preserves native denial through reentry, and records bounded error notices.
+Ten new app-host tests cover these cases plus tap-release field ownership in both
+widget orders, two owned paste outcomes, Escape, callback panic recovery and
+cross-thread reentry. These run with the production iPad feature flags.
+
+The clipboard crate has eleven passing tests covering numerical P3 conversion,
+JPEG, grayscale alpha, PNG metadata precedence, malformed/over-budget profiles,
+16-bit decoding bounds and prior image tests. `check-bridge.sh` now includes both
+excluded native workspaces. Interactive multiple-click ordering, actual device
+permissions and IME qualification remain open; no task gate is released.
+
+## 2026-10-18: T13 production follow-up and isolated T10 coordinator
+
+Native Copy as PNG now uses a result-bearing service and shows success only after
+acknowledgement. Denied/unavailable writes preserve the document and selection.
+Desktop and browser output behavior is unchanged. Clipboard image decoding checks
+the expanded RGBA size before allocating pixels; the regression uses an oversized
+grayscale header without a valid pixel payload. Invalid native images retain their
+error category. The excluded clipboard lockfile now names the production crate,
+without changing dependency versions.
+
+Full CI passes with 2,528 tests and nine ignored, including shared UI, engine,
+desktop, WASM, layers, assets and plugins. The standalone clipboard crate passes
+four tests and both target Clippy checks. Both iOS app checks pass. The linked
+production executable renders the synthetic editor in an isolated simulator
+container; no interactive clipboard or physical qualification is inferred.
+
+The existing T10 coordinator remains test-only because T07 has not released its
+dependency gate. It now rejects non-file roots/destinations, foreign-root keys and
+poisoned locks, retains exclusive staging ownership, and tests preservation of
+existing bytes on a failed staging write. Staging names also fit when the destination
+uses the full 255-byte leaf allowance. Its ten tests pass within the app's
+20-test CI result. Persistent IDs, recents, Save/Save As, worker bounds and device
+filesystem behavior are not implemented or qualified by this checkpoint.
+
 ## 2026-10-16: T33 owned export trees
 
 The T06 audit found that batch exports can create icons/close.png, while the T05 dispatcher accepted only single filenames. T33 adds ExportTree beside ExportFiles, retaining a staging lease and validating a bounded set of relative paths. The desktop adapter copies the declared tree into the chosen folder and reports errors through the existing completion route. Existing picker call sites are unchanged until T06.

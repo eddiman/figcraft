@@ -1,6 +1,7 @@
-//! Isolated D13 revision 5 named-pasteboard experiment. No general-board access.
+//! D13 owned clipboard boundary. General-board access requires an explicit host.
 #![deny(unsafe_code)]
 pub mod image_data;
+mod image_profile;
 pub mod snapshot;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {

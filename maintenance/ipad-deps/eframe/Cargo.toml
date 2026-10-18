@@ -53,6 +53,7 @@ targets = [
 rustdoc-args = ["--generate-link-to-definition"]
 
 [features]
+figcraft-ipad-focus = ["egui/figcraft-ipad-focus"]
 figcraft-ipad-clipboard = ["egui/figcraft-ipad-clipboard", "egui-winit/figcraft-ipad-clipboard"]
 __screenshot = []
 accesskit = ["egui-winit/accesskit"]

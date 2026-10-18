@@ -2,6 +2,15 @@
 
 The app reuses the shared engine, editor and pinned eframe/Wgpu host approved for development in D02 revision 3. Rust main starts the only event loop. The Xcode target invokes Cargo to link the executable and processes the bundle without introducing another UIApplication entry point. Host workspace builds compile an iOS-only notice instead of the native application module; the app's dependencies are conditional on target_os = ios.
 
+The app enables the pinned host's `figcraft-ipad-focus` feature. Native redraws
+consume up to eight ordered input batches before rendering their combined
+output; the existing pending buffer retains any suffix for the next redraw.
+This preserves field ownership before egui aggregates clicks and keeps the
+existing Native coordinator as the only input owner. Hidden logic-only ticks
+do not run the mutating native input hook. Desktop/web behavior is unchanged.
+Host regressions and startup rendering pass; interactive input backlogs and
+hidden/resumed canvas behavior still need qualification.
+
 ## Prerequisites
 
 Install full Xcode, its iOS SDKs and the Rust targets `aarch64-apple-ios` and `aarch64-apple-ios-sim` explicitly. Fetch locked Cargo dependencies before building. Build scripts run Cargo offline and do not install anything. Missing Xcode, SDKs, Rust targets or cached dependencies fail the build.
@@ -36,7 +45,7 @@ The Release configuration is not a release-qualification path: the scheme and sc
 
 ## Simulator smoke
 
-The default app opens a shared blank editor with the iPad capability provider. Native copy pickers support import and export. Recovery uses completed checkpoints under Library/Application Support/FigCraft/Recovery, adopts previous-run copies at startup, and requests a bounded checkpoint when the application becomes inactive. Native Save and clipboard adapters remain pending. The provider explicitly disables multiple windows, reveal, local hosting and plugin downloads; unsupported requests return Unsupported. Pass `--smoke` for the deterministic T01 small fixture and ordinary egui field; the Xcode launch scheme enables this argument for development.
+The default app opens a shared blank editor with the iPad capability provider. Native copy pickers support import and export. Recovery uses completed checkpoints under Library/Application Support/FigCraft/Recovery, adopts previous-run copies at startup, and requests a bounded checkpoint when the application becomes inactive. Owned local Save/Save As is implemented as described below. The development clipboard adapter handles owned text and images, with interactive and physical qualification still open. The provider explicitly disables multiple windows, reveal, local hosting and plugin downloads; unsupported requests return Unsupported. Pass `--smoke` for the deterministic T01 small fixture and ordinary egui field; the Xcode launch scheme enables this argument for development.
 
 ```sh
 xcrun simctl install BCCE5B8D-96D3-45C1-84DD-3E0C84C9AE99 target/ipad-xcode/simulator/Build/Products/Debug-iphonesimulator/FigcraftIPad.app
@@ -57,14 +66,105 @@ The temporary spike sources were removed after T03 simulator parity checks. The 
 cargo check --locked -p figcraft-ipad --target aarch64-apple-ios
 cargo check --locked -p figcraft-ipad --target aarch64-apple-ios-sim
 python3 packaging/ipad/tests/ipad_build_prerequisites.py
+python3 packaging/ipad/tests/ipad_host_input.py
 cargo xtask ci
 ```
 
-The prerequisite checks simulate unavailable tools/targets through temporary wrappers rather than uninstalling anything. Physical-device checks are deferred by the user; simulator passes do not certify Pencil, VoiceOver, thermal/memory behavior or ten physical suspend/resume cycles. T03 creates development builds, not a qualified alpha or release candidate.
+The host-input runner exercises the actual vendored eframe update loop with a
+headless Frame, including the redraw budget, suffix ordering, hidden/resumed
+normalization, combined outputs and close cancellation. Both check-bridge.sh
+targets invoke it. It requires six passing tests, checks formatting, and runs
+Clippy with diagnostics in the changed host/test files treated as failures.
+Existing vendored Clippy warnings elsewhere are printed, not suppressed; strict
+standalone eframe Clippy still has those baseline failures.
+
+Because eframe is excluded from root workspace tests, the runner creates a
+temporary manifest pointing directly at its original library source. It omits
+the unused inspection dependency, copies the root lockfile and development
+profiles, and uses the production local dependency patches. Active runtime
+versions must match the root lockfile; dev-only versions must appear in either
+the root or vendored eframe lockfile. Checks run offline and tests use the
+resolved temporary lockfile with --locked. No production manifest/lockfile is
+rewritten, and the temporary directory is removed on exit. These are headless
+host-loop tests, not simulator interaction or physical lifecycle qualification.
+
+The prerequisite checks simulate unavailable tools/targets through temporary wrappers rather than uninstalling anything. Physical-device checks are deferred by the user; simulator passes do not certify Pencil, thermal/memory behavior or ten physical suspend/resume cycles. VoiceOver, contrast and reduced-motion requirements are excluded from the iPad port scope and acceptance gates. Existing shared code, labels, keyboard navigation and UI sizing requirements remain. T03 creates development builds, not a qualified alpha or release candidate.
+
+## Automated simulator tests and CI (T23)
+
+```sh
+python3 packaging/ipad/tests/ipad_simulator_runner.py
+packaging/ipad/test.sh simulator
+# Optional explicit destination and a NEW evidence directory:
+packaging/ipad/test.sh simulator --udid IPAD_UDID --output target/ipad-smoke
+```
+
+The runner requires Apple Silicon, full Xcode with XCTest/Vision and an available
+iPad simulator running iOS 17 or newer. It uses the simulator device type, not
+the editable display name, to reject phones. It prefers an already booted iPad,
+records its UDID/runtime and shuts down only a destination it booted itself.
+It fails if no supported iPad exists; it never installs a runtime automatically.
+
+Each run builds the current Rust app and a separate Swift XCTest UI-test bundle.
+The Swift code is test infrastructure only, using public XCTest input and Vision
+recognition of the actual rendered egui screen. There is no production test
+command channel or new native/accessibility bridge. The app and runner receive
+unique bundle identifiers, use fresh containers and are uninstalled on exit.
+The development app's container and clipboard are not used. Do not run parallel
+simulator checks against the same checkout.
+
+The smoke workflow covers startup, the generated small fixture, field typing,
+the existing smoke control's `node.set` edit and cold restart. This is a bounded
+simulator workflow, not simultaneous-touch, Pencil, software-keyboard/IME,
+physical lifecycle or general font qualification.
+
+Evidence is retained in a unique `target/ipad-tests/run-*` directory, or the
+new directory supplied with `--output`: source/toolchain/SDK inputs, build and
+test logs, destination metadata, `.xcresult`, JSON test summary and exported
+screenshots/attachments. Copied app bundles are cleaned up. A passing process
+exit alone is insufficient: a nonzero passing test count and no failed, skipped
+or expected-failure tests are required.
+
+To prove failure propagation, run `test.sh simulator --test-failure --output
+target/ipad-negative`. It must fail. Then run
+`python3 packaging/ipad/tests/ipad_simulator_runner.py --verify-failure
+target/ipad-negative/summary.json` to distinguish the deliberate assertion from
+an unrelated build/startup failure.
+
+`.github/workflows/ipad-ci.yml` adds separate unsigned device/simulator jobs on
+the standard Apple Silicon `macos-15` runner, with Rust 1.98.1 and Xcode 26.3.
+Caches include compiler/SDK/target/lockfile inputs; PRs only restore caches.
+The jobs fetch locked dependencies before the existing offline build scripts,
+check both iOS targets, link both app variants and run the positive/negative
+simulator checks. They require no signing credentials or release environment.
+Existing upstream Linux/wasm jobs are unchanged. The workflow is restricted to
+downstream repositories to preserve the original project's macOS runner policy.
+The authorized fork is `eddiman/figcraft` (`origin`); the original repository is
+preserved as `upstream`. Remote CI remains configured, not verified, until the
+workflow executes in the fork; local evidence does not certify hosted-runner
+execution.
 
 ## Native copy services (T07)
 
-The app installs IPadServices from apps/figcraft-ipad/src/services.rs. Open/import actions copy the selected input into a unique persistent Library/Application Support/FigCraft/Imports directory before the engine receives a path. Equal display names do not overwrite an earlier copy. Exporting a batch packages its declared relative paths into one staged folder named Export, then asks the system to copy that folder. Single exports copy their staged files. Native Save/Save As remain unsupported until durable persistence is connected by T10.
+The app installs IPadServices from apps/figcraft-ipad/src/services.rs. Open/import actions copy the selected input into a unique persistent Library/Application Support/FigCraft/Imports directory before the engine receives a path. Equal display names do not overwrite an earlier copy. Exporting a batch packages its declared relative paths into one staged folder named Export, then asks the system to copy that folder. Single exports copy their staged files.
+
+### Local Save and Save As (T10)
+
+File > Save writes an existing owned .figcraft document. An untitled document or
+an imported non-.figcraft file opens the local-copy naming dialog instead.
+Save As always creates a new owned copy; it does not select a Files destination
+or overwrite the imported original. Use Export Copy for an external copy.
+
+The editor captures the document when Save/Save As is activated, before naming.
+A bounded worker encodes and synchronizes the archive off the UI thread.
+Only successful acknowledgement clears the matching saved baseline; edits made
+after capture remain dirty. Accepted saves survive tab closure. Relative recents
+resolve against the current app container at launch.
+
+Simulator Save As, edited Save and recents reopening after relaunch are verified.
+Physical-device cancellation, interrupted writes and real disk/sync failures
+remain in review. Host destruction before UI completion does not guarantee a
+recents entry for a drained write; recovery remains a separate mechanism.
 
 The reviewed bridge lives in platform/apple-ipad, an isolated Rust workspace. Its private native.rs contains the D07 UIKit exception; shared/app safety lints remain unchanged. Root host CI does not run its standalone checks. With DEVELOPER_DIR set to the existing Xcode installation, run packaging/ipad/check-bridge.sh simulator and packaging/ipad/check-bridge.sh device in addition to the normal build checks. These commands test callback containment on the host and lint the target-specific bridge. They do not claim physical-device execution.
 
@@ -105,3 +205,39 @@ Its metrics can change line wrapping and text bounds. Compare desktop/native tex
 using the same explicit BIZ UDPGothic font before assessing rendering parity.
 UI language availability for CJK requires the actual embedded sample glyphs.
 Device text/render qualification remains deferred.
+
+## Clipboard development checks (T13)
+
+The shell installs one revocable general-pasteboard owner without reading or
+seeding the clipboard at startup. Explicit Paste returns one owned outcome.
+Native Copy as PNG reports success only after its writer acknowledges the image;
+denial or unavailability is shown instead of a success message. Desktop/browser
+adapters retain their existing output-based behavior.
+
+The excluded `platform/apple-ipad-clipboard` crate requires its own checks:
+
+```sh
+cargo test --locked --manifest-path platform/apple-ipad-clipboard/Cargo.toml
+cargo clippy --locked --manifest-path platform/apple-ipad-clipboard/Cargo.toml \
+    --all-targets --target aarch64-apple-ios-sim -- -D warnings
+cargo clippy --locked --manifest-path platform/apple-ipad-clipboard/Cargo.toml \
+    --all-targets --target aarch64-apple-ios -- -D warnings
+```
+
+The clipboard decoder checks encoded size and expanded RGBA dimensions before
+pixel decoding, then applies decoder allocation limits. Simulator startup and
+host regressions do not qualify tap-to-focus, hardware shortcuts, paste permission
+prompts, Universal Clipboard, or IME.
+
+Supported PNG/JPEG RGB and grayscale ICC profiles are converted to straight sRGB
+RGBA. PNG gamma/primaries and SDR sRGB/Display P3 cICP metadata are supported.
+Malformed/discarded profiles and unsupported HDR fail instead of silently changing
+colors. ICC metadata has a separate 4 MiB budget. Numerical conversion, alpha and
+malformed-input checks use generated synthetic images; real-device interoperability
+still needs qualification. moxcms and png retain their existing pinned versions.
+
+`packaging/ipad/check-bridge.sh simulator` and `device` now run the standalone
+clipboard checks as well as the document/lifecycle bridge checks.
+`cargo test --locked -p figcraft-ipad` also runs ten production-feature callback
+and field-focus regressions. These host tests include invalid-receipt Cut
+preservation, cross-thread reentry, two paste outcomes and Escape after a tap.

@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::{FigApp, Services};
+use figcraft_engine::persistence::{PreparedSave, SaveAssurance, SaveDestination, SaveOutcome, WriteOrder, acknowledge_save, prepare_save};
 
 const MAX_PENDING: usize = 8;
 const MAX_COMPLETIONS_PER_FRAME: usize = 32;
@@ -121,6 +122,33 @@ pub struct Completion {
     pub result: PlatformResult,
 }
 
+#[derive(Clone, Debug)]
+pub enum OwnedSaveDestination {
+    Existing(String),
+    NewCopy(String),
+}
+
+pub struct OwnedSaveRequest {
+    pub prepared: PreparedSave,
+    pub destination: OwnedSaveDestination,
+}
+
+pub struct OwnedSaveCompletion {
+    pub order: WriteOrder,
+    pub result: Result<OwnedSaveOutcome, String>,
+}
+
+pub enum OwnedSaveOutcome {
+    Saved(String),
+    Superseded,
+}
+
+struct OwnedSavePrompt {
+    prepared: PreparedSave,
+    name: String,
+    focus: bool,
+}
+
 pub type PlatformDone = Box<dyn FnOnce(&mut FigApp, Payload)>;
 pub(crate) type ImportDone = Box<dyn FnOnce(&mut FigApp, &Path)>;
 pub(crate) type ExportDone = Box<dyn FnOnce(&mut FigApp, serde_json::Value)>;
@@ -138,6 +166,8 @@ struct Pending {
 #[derive(Default)]
 pub(crate) struct PendingRequests {
     entries: BTreeMap<RequestId, Pending>,
+    saves: BTreeMap<WriteOrder, PreparedSave>,
+    save_prompt: Option<OwnedSavePrompt>,
 }
 
 fn allocate_id(counter: &AtomicU64) -> Result<RequestId, RejectReason> {
@@ -145,6 +175,125 @@ fn allocate_id(counter: &AtomicU64) -> Result<RequestId, RejectReason> {
 }
 
 impl FigApp {
+    pub(crate) fn begin_owned_save(&mut self, save_as: bool) {
+        if self.platform_requests.save_prompt.is_some() {
+            self.platform_error("A Save As dialog is already open");
+            return;
+        }
+        self.cancel_canvas_pointer();
+        let Some(document) = self.platform_document() else {
+            self.platform_error("There is no document to save");
+            return;
+        };
+        let prepared = match prepare_save(&mut self.session, document.uid) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                self.platform_error(&error.to_string());
+                return;
+            }
+        };
+        let source = self.session.docs.iter().find(|tab| tab.uid == prepared.identity().document_uid());
+        let existing = source.and_then(|tab| tab.path.clone()).filter(|path| Path::new(path).extension().is_some_and(|ext| ext == "figcraft"));
+        if !save_as && let Some(path) = existing {
+            self.submit_owned_save(prepared, OwnedSaveDestination::Existing(path));
+        } else {
+            let name = source.map(|tab| tab.document_itself().name.clone()).unwrap_or_else(|| "Untitled".into());
+            self.platform_requests.save_prompt = Some(OwnedSavePrompt { prepared, name, focus: true });
+            self.platform_context.request_repaint();
+        }
+    }
+
+    fn submit_owned_save(&mut self, prepared: PreparedSave, destination: OwnedSaveDestination) -> bool {
+        if self.platform_requests.saves.len() >= MAX_PENDING {
+            self.platform_error("Too many saves are pending; wait for a save to finish");
+            return false;
+        }
+        let order = prepared.identity().write_order();
+        self.services.set_request_repaint(self.platform_context.clone());
+        match self.services.submit_owned_save(OwnedSaveRequest { prepared: prepared.clone(), destination }) {
+            Ok(()) => {
+                self.platform_requests.saves.insert(order, prepared);
+                self.toast(crate::i18n::tr("Saving..."));
+                true
+            }
+            Err(error) => {
+                self.platform_error(&error);
+                false
+            }
+        }
+    }
+
+    pub(crate) fn owned_save_pending(&self, uid: u64) -> bool {
+        self.platform_requests.saves.values().any(|prepared| prepared.identity().document_uid() == uid)
+    }
+
+    fn poll_owned_saves(&mut self, ctx: &egui::Context) {
+        if !self.platform_requests.saves.is_empty() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+        }
+        for _ in 0..MAX_COMPLETIONS_PER_FRAME {
+            if self.canvas_pointer.is_some() {
+                break;
+            }
+            let Some(completion) = self.services.take_owned_save_completion() else { break };
+            let Some(prepared) = self.platform_requests.saves.remove(&completion.order) else { continue };
+            let path = match completion.result {
+                Ok(OwnedSaveOutcome::Saved(path)) => path,
+                Ok(OwnedSaveOutcome::Superseded) => continue,
+                Err(error) => {
+                    self.platform_error(&error);
+                    continue;
+                }
+            };
+            match acknowledge_save(&mut self.session, &prepared, SaveDestination::SaveAs(path.clone()), SaveAssurance::SyncedReplacement) {
+                Ok(SaveOutcome::CurrentSaved) => self.toast(crate::i18n::tr("Saved")),
+                Ok(SaveOutcome::OlderSnapshotSaved) => self.toast(crate::i18n::tr("An earlier snapshot was saved; newer changes remain unsaved")),
+                Ok(SaveOutcome::DocumentClosed) => {
+                    self.session.prefs.recent_files.retain(|recent| recent != &path);
+                    self.session.prefs.recent_files.insert(0, path);
+                    self.session.prefs.recent_files.truncate(figcraft_engine::cmd::file::MAX_RECENT);
+                    self.toast(crate::i18n::tr("Saved the closed document"));
+                }
+                Ok(SaveOutcome::Superseded) => {
+                    if !self.session.prefs.recent_files.contains(&path) {
+                        self.session.prefs.recent_files.push(path);
+                        self.session.prefs.recent_files.truncate(figcraft_engine::cmd::file::MAX_RECENT);
+                    }
+                }
+                Err(error) => self.platform_error(&error.to_string()),
+            }
+            self.services.save_prefs(&self.session.prefs);
+        }
+        let Some(mut prompt) = self.platform_requests.save_prompt.take() else { return };
+        if !self.session.docs.iter().any(|tab| tab.uid == prompt.prepared.identity().document_uid()) {
+            return;
+        }
+        let mut open = true;
+        let mut save = false;
+        let mut cancel = false;
+        crate::dialogs::window(crate::i18n::tr("Save as"), ctx).id(egui::Id::new("owned-save-as")).open(&mut open).show(ctx, |ui| {
+            ui.label(crate::i18n::tr("Save a local copy in this app. The imported original is unchanged."));
+            let field = ui.text_edit_singleline(&mut prompt.name);
+            if prompt.focus {
+                field.request_focus();
+                prompt.focus = false;
+            }
+            save = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+            ui.horizontal(|ui| {
+                save |= ui.button(crate::i18n::tr("Save")).clicked();
+                cancel = ui.button(crate::i18n::tr("Cancel")).clicked();
+            });
+        });
+        cancel |= ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+        if save {
+            if !self.submit_owned_save(prompt.prepared.clone(), OwnedSaveDestination::NewCopy(prompt.name.clone())) {
+                self.platform_requests.save_prompt = Some(prompt);
+            }
+        } else if open && !cancel {
+            self.platform_requests.save_prompt = Some(prompt);
+        }
+    }
+
     pub(crate) fn platform_command_allowed(&mut self, command: &str, params: &serde_json::Value) -> bool {
         let caps = self.services.capabilities();
         let denied = match command {
@@ -287,6 +436,7 @@ impl FigApp {
     }
 
     pub fn cancel_platform_requests(&mut self) {
+        self.platform_requests.save_prompt = None;
         for (id, _) in std::mem::take(&mut self.platform_requests.entries) {
             self.services.cancel_request(id);
         }
@@ -306,6 +456,7 @@ impl FigApp {
     }
 
     pub fn poll_platform_requests(&mut self, ctx: &egui::Context) {
+        self.poll_owned_saves(ctx);
         self.cancel_closed_platform_requests();
         for _ in 0..MAX_COMPLETIONS_PER_FRAME {
             let Some(completion) = self.services.take_completion() else { return };

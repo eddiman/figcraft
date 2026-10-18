@@ -9,6 +9,7 @@ fn write_error(error: Error) -> egui::TextClipboardError {
     match error {
         Error::TooLarge => egui::TextClipboardError::TooLarge,
         Error::Panicked => egui::TextClipboardError::Panicked,
+        Error::InvalidImage | Error::InvalidToken => egui::TextClipboardError::InvalidContent,
         _ => egui::TextClipboardError::Unavailable,
     }
 }

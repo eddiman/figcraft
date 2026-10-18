@@ -1,5 +1,5 @@
 //! UI-thread request queue. Native objects remain inside figcraft-apple-ipad.
-use crate::documents::{ExportCopy, ImportCopy};
+use crate::documents::{ExportCopy, ImportCopy, OwnedRecents};
 use figcraft_apple_ipad::{Host, Operation as NativeOperation, Outcome, PresentationError};
 use figcraft_ui_egui::platform_requests::{
     Completion, Operation, Payload, PlatformRequest, PlatformResult, RejectReason, RequestId, SelectedCopy, Submission,
@@ -21,18 +21,27 @@ pub struct IPadServices {
     host: Host,
     recovery: crate::recovery::Shared,
     imports: PathBuf,
+    recents: OwnedRecents,
+    saved_recents: Vec<String>,
+    saves: crate::saves::SaveWorker,
     context: Option<egui::Context>,
     queued: VecDeque<Rc<Prepared>>,
     active: Option<Rc<Prepared>>,
     completed: VecDeque<Completion>,
 }
 impl IPadServices {
-    pub fn new(recovery: crate::recovery::Shared) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(recovery: crate::recovery::Shared, session: &mut figcraft_engine::Session) -> Result<Self, Box<dyn std::error::Error>> {
         let home = std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| std::io::Error::other("application home is unavailable"))?;
+        let recents = OwnedRecents::open(&home.join("Library/Application Support/FigCraft/Imports"))?;
+        let saved_recents = recents.load()?;
+        session.prefs.recent_files = saved_recents.clone();
         Ok(Self {
             recovery,
             host: Host::new().map_err(std::io::Error::other)?,
-            imports: home.join("Library/Application Support/FigCraft/Imports"),
+            imports: recents.directory().to_path_buf(),
+            saves: crate::saves::SaveWorker::new(recents.directory())?,
+            recents,
+            saved_recents,
             context: None,
             queued: VecDeque::new(),
             active: None,
@@ -137,6 +146,26 @@ impl IPadServices {
     }
 }
 impl Services for IPadServices {
+    fn supports_owned_saves(&self) -> bool {
+        true
+    }
+    fn submit_owned_save(&mut self, request: figcraft_ui_egui::platform_requests::OwnedSaveRequest) -> Result<(), String> {
+        let context = self.context.clone().ok_or("The save completion notifier is unavailable")?;
+        self.saves.submit(request, context)
+    }
+    fn take_owned_save_completion(&mut self) -> Option<figcraft_ui_egui::platform_requests::OwnedSaveCompletion> {
+        self.saves.poll()
+    }
+
+    fn save_prefs(&mut self, prefs: &figcraft_engine::Prefs) {
+        if prefs.recent_files != self.saved_recents {
+            match self.recents.save(&prefs.recent_files) {
+                Ok(()) => self.saved_recents.clone_from(&prefs.recent_files),
+                Err(error) => log::error!("Could not persist owned recent documents: {error}"),
+            }
+        }
+    }
+
     fn clipboard_requires_confirmation(&self) -> bool {
         true
     }
@@ -163,11 +192,16 @@ impl Services for IPadServices {
         }
     }
     fn clipboard_set_png(&mut self, width: u32, height: u32, rgba: &[u8]) {
-        if let Some(ctx) = &self.context {
-            if let Err(error) = ctx.try_copy_rgba(egui::PasteImage { width, height, rgba: rgba.to_vec() }) {
-                log::warn!("Clipboard image write failed: {error}");
-            }
+        if let Err(error) = self.clipboard_try_set_png(width, height, rgba) {
+            log::warn!("Clipboard image write failed: {error}");
         }
+    }
+    fn clipboard_try_set_png(&mut self, width: u32, height: u32, rgba: &[u8]) -> Result<(), String> {
+        self.context
+            .as_ref()
+            .ok_or_else(|| "Clipboard context is unavailable".to_owned())?
+            .try_copy_rgba(egui::PasteImage { width, height, rgba: rgba.to_vec() })
+            .map_err(|error| error.to_string())
     }
     fn emergency_save(&mut self, session: &figcraft_engine::Session) {
         crate::lifecycle::emergency(&self.recovery, session);

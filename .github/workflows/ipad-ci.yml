@@ -1,0 +1,100 @@
+name: iPad CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ipad-ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  RUST_BACKTRACE: 1
+
+jobs:
+  ipad:
+    # This downstream workflow must not consume the original project's macOS budget.
+    if: github.repository != 'storytold/figcraft'
+    runs-on: macos-15
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kind: simulator
+            target: aarch64-apple-ios-sim
+          - kind: device
+            target: aarch64-apple-ios
+    name: iPad ${{ matrix.kind }} (unsigned)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.1
+        with:
+          targets: ${{ matrix.target }}
+      - name: Record and check runner inputs
+        id: inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/ipad-ci-evidence
+          test "$(uname -m)" = arm64
+          {
+            sw_vers
+            rustc -vV
+            xcodebuild -version
+            xcrun --sdk iphoneos --show-sdk-version
+            xcrun --sdk iphonesimulator --show-sdk-version
+          } | tee target/ipad-ci-evidence/inputs.log
+          printf 'sdk=%s\n' "$(shasum -a 256 target/ipad-ci-evidence/inputs.log | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ipad-${{ matrix.target }}-${{ steps.inputs.outputs.sdk }}-${{ hashFiles('**/Cargo.lock') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Fetch locked dependencies
+        run: cargo fetch --locked
+      - name: Check iOS target
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cargo check --locked -p figcraft-ipad --target "$TARGET"
+      - name: Runner regression tests
+        if: matrix.kind == 'simulator'
+        run: python3 packaging/ipad/tests/ipad_simulator_runner.py
+      - name: Linked simulator UI tests
+        if: matrix.kind == 'simulator'
+        run: packaging/ipad/test.sh simulator --output target/ipad-ci-evidence/smoke
+      - name: Prove assertion failures fail the runner
+        if: matrix.kind == 'simulator'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if packaging/ipad/test.sh simulator --test-failure --output target/ipad-ci-evidence/negative; then
+            echo "::error::The deliberate assertion failure returned success"
+            exit 1
+          else
+            status=$?
+            test "$status" -eq 65
+          fi
+          python3 packaging/ipad/tests/ipad_simulator_runner.py --verify-failure target/ipad-ci-evidence/negative/summary.json
+      - name: Link unsigned device app
+        if: matrix.kind == 'device'
+        shell: bash
+        run: |
+          set -euo pipefail
+          packaging/ipad/build.sh device --unsigned 2>&1 | tee target/ipad-ci-evidence/device-build.log
+      - name: Retain logs and simulator results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ipad-${{ matrix.kind }}-${{ github.run_id }}
+          path: target/ipad-ci-evidence/
+          if-no-files-found: error
+          retention-days: 7

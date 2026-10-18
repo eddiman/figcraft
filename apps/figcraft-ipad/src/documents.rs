@@ -1,6 +1,6 @@
 //! Owned import directories and export folders. No native handles or engine state.
 use std::collections::BTreeSet;
-use std::io;
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{
     Arc,
@@ -125,6 +125,147 @@ fn check_source(source: &Path, relative: &str) -> io::Result<()> {
     }
     Ok(())
 }
+
+/// Persistent owned-copy identity, independent of an engine session's document UID.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct DocumentId(String);
+
+impl DocumentId {
+    fn parse(value: &str) -> io::Result<Self> {
+        let parts: Vec<_> = value.split('-').collect();
+        if value.len() > 96
+            || parts.len() != 4
+            || parts.first() != Some(&"import")
+            || parts.iter().skip(1).any(|part| part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()))
+        {
+            return Err(io::Error::other("invalid owned document ID"));
+        }
+        Ok(Self(value.to_owned()))
+    }
+}
+
+const MAX_RECENTS: usize = 256;
+const MAX_RECENTS_BYTES: u64 = 64 * 1024;
+
+/// The on-disk index contains a schema version and (document ID, file name) pairs,
+/// never an absolute container prefix. Display paths are resolved for this launch.
+pub struct OwnedRecents {
+    root: PathBuf,
+}
+
+impl OwnedRecents {
+    pub fn open(imports: &Path) -> io::Result<Self> {
+        std::fs::create_dir_all(imports)?;
+        let metadata = std::fs::symlink_metadata(imports)?;
+        if !metadata.is_dir() || metadata.file_type().is_symlink() {
+            return Err(io::Error::other("owned recents root must be a directory"));
+        }
+        Ok(Self { root: std::fs::canonicalize(imports)? })
+    }
+
+    pub fn directory(&self) -> &Path {
+        &self.root
+    }
+
+    pub fn validate_document(&self, path: &Path) -> io::Result<PathBuf> {
+        let (id, name) = self.reference(path)?;
+        self.resolve(&id, &name)
+    }
+
+    fn reference(&self, path: &Path) -> io::Result<(DocumentId, String)> {
+        let relative = path.strip_prefix(&self.root).map_err(|_| io::Error::other("recent document is outside owned storage"))?;
+        let parts: Vec<_> = relative.components().collect();
+        let [std::path::Component::Normal(id), std::path::Component::Normal(name)] = parts.as_slice() else {
+            return Err(io::Error::other("recent document must have an owned ID and file name"));
+        };
+        let id = DocumentId::parse(id.to_str().ok_or_else(|| io::Error::other("document ID is not UTF-8"))?)?;
+        let name = name.to_str().ok_or_else(|| io::Error::other("document file name is not UTF-8"))?;
+        Ok((id, name.to_owned()))
+    }
+
+    fn resolve(&self, id: &DocumentId, name: &str) -> io::Result<PathBuf> {
+        if name.is_empty() || name.len() > 255 || name.contains(['/', '\\', ':']) || name == "." || name == ".." || name.chars().any(char::is_control)
+        {
+            return Err(io::Error::other("invalid owned document file name"));
+        }
+        let directory = self.root.join(&id.0);
+        let metadata = std::fs::symlink_metadata(&directory)?;
+        if !metadata.is_dir() || metadata.file_type().is_symlink() {
+            return Err(io::Error::other("owned document directory was replaced"));
+        }
+        let path = directory.join(name);
+        let metadata = std::fs::symlink_metadata(&path)?;
+        if !metadata.is_file() || metadata.file_type().is_symlink() {
+            return Err(io::Error::other("owned document is not a regular file"));
+        }
+        Ok(path)
+    }
+
+    pub fn load(&self) -> io::Result<Vec<String>> {
+        let index = self.root.join(".recents.json");
+        let metadata = match std::fs::symlink_metadata(&index) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(error),
+        };
+        if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > MAX_RECENTS_BYTES {
+            return Err(io::Error::other("invalid or oversized owned recents index"));
+        }
+        let mut bytes = Vec::new();
+        std::fs::File::open(index)?.take(MAX_RECENTS_BYTES + 1).read_to_end(&mut bytes)?;
+        if bytes.len() as u64 > MAX_RECENTS_BYTES {
+            return Err(io::Error::other("owned recents index exceeds its budget"));
+        }
+        let (version, records): (u32, Vec<(String, String)>) = serde_json::from_slice(&bytes).map_err(io::Error::other)?;
+        if version != 1 || records.len() > MAX_RECENTS {
+            return Err(io::Error::other("unsupported owned recents index"));
+        }
+        let mut seen = BTreeSet::new();
+        let mut paths = Vec::new();
+        for (id, name) in records {
+            let id = DocumentId::parse(&id)?;
+            if !seen.insert((id.clone(), name.clone())) {
+                return Err(io::Error::other("duplicate owned recents entry"));
+            }
+            match self.resolve(&id, &name) {
+                Ok(path) => paths.push(path.into_os_string().into_string().map_err(|_| io::Error::other("owned document path is not UTF-8"))?),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    log::warn!("Recent owned document {} is missing: {error}", id.0);
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(paths)
+    }
+
+    pub fn save(&self, paths: &[String]) -> io::Result<()> {
+        if paths.len() > MAX_RECENTS {
+            return Err(io::Error::other("too many owned recent documents"));
+        }
+        let mut records = Vec::new();
+        let mut seen = BTreeSet::new();
+        for path in paths {
+            let (id, name) = self.reference(Path::new(path))?;
+            self.resolve(&id, &name)?;
+            if seen.insert((id.clone(), name.clone())) {
+                records.push((id.0, name));
+            }
+        }
+        let bytes = serde_json::to_vec(&(1u32, records)).map_err(io::Error::other)?;
+        if bytes.len() as u64 > MAX_RECENTS_BYTES {
+            return Err(io::Error::other("owned recents index exceeds its budget"));
+        }
+        // Reuse the copy guard so a failed write removes only this new staging directory.
+        let staging = ImportCopy::create(&self.root)?;
+        let staged = staging.directory().join("recents.json");
+        let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&staged)?;
+        file.write_all(&bytes)?;
+        file.sync_all()?;
+        std::fs::rename(staged, self.root.join(".recents.json"))?;
+        std::fs::File::open(&self.root)?.sync_all()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -180,5 +321,70 @@ mod tests {
         for name in ["../escape", "/root", "a//b", "a/./b", "a\\b"] {
             assert!(ExportCopy::create(&std::env::temp_dir(), &[(name.into(), file.clone())]).is_err());
         }
+    }
+
+    #[test]
+    fn ipad_recents_survive_container_path_change() {
+        let container = ImportCopy::create(&std::env::temp_dir()).unwrap();
+        let original = container.directory().join("old-container");
+        let relocated = container.directory().join("new-container");
+        let store = OwnedRecents::open(&original).unwrap();
+        let copy = ImportCopy::create(store.directory()).unwrap();
+        let path = copy.directory().join("synthetic.svg");
+        std::fs::write(&path, b"<svg/>").unwrap();
+        copy.promote(&path).unwrap();
+        let id = DocumentId::parse(copy.directory().file_name().unwrap().to_str().unwrap()).unwrap();
+        store.save(&[path.to_str().unwrap().into()]).unwrap();
+        let encoded = std::fs::read_to_string(original.join(".recents.json")).unwrap();
+        assert!(!encoded.contains(original.to_str().unwrap()));
+        drop(copy);
+        drop(store);
+        std::fs::rename(original, &relocated).unwrap();
+        let reopened = OwnedRecents::open(&relocated).unwrap();
+        let expected = reopened.directory().join(&id.0).join("synthetic.svg");
+        assert_eq!(reopened.load().unwrap(), [expected.to_str().unwrap()]);
+        assert_eq!(std::fs::read(expected).unwrap(), b"<svg/>");
+    }
+
+    #[test]
+    fn ipad_recents_invalid_write_preserves_previous_index() {
+        let root = ImportCopy::create(&std::env::temp_dir()).unwrap();
+        let store = OwnedRecents::open(root.directory()).unwrap();
+        let copy = ImportCopy::create(store.directory()).unwrap();
+        let path = copy.directory().join("synthetic.figcraft");
+        std::fs::write(&path, b"owned").unwrap();
+        store.save(&[path.to_str().unwrap().into()]).unwrap();
+        let before = std::fs::read(root.directory().join(".recents.json")).unwrap();
+        assert!(store.save(&["/outside/unowned.figcraft".into()]).is_err());
+        assert_eq!(std::fs::read(root.directory().join(".recents.json")).unwrap(), before);
+        assert_eq!(store.load().unwrap(), [path.to_str().unwrap()]);
+    }
+
+    #[test]
+    fn ipad_recents_reject_corrupt_oversized_and_traversing_indexes() {
+        let root = ImportCopy::create(&std::env::temp_dir()).unwrap();
+        let store = OwnedRecents::open(root.directory()).unwrap();
+        let index = root.directory().join(".recents.json");
+        for bytes in [
+            b"not json".to_vec(),
+            br#"[2,[]]"#.to_vec(),
+            br#"[1,[["../escape","document.figcraft"]]]"#.to_vec(),
+            vec![b' '; MAX_RECENTS_BYTES as usize + 1],
+        ] {
+            std::fs::write(&index, bytes).unwrap();
+            assert!(store.load().is_err());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ipad_recents_reject_replaced_document_directory() {
+        let root = ImportCopy::create(&std::env::temp_dir()).unwrap();
+        let store = OwnedRecents::open(root.directory()).unwrap();
+        let outside = ImportCopy::create(&std::env::temp_dir()).unwrap();
+        std::fs::write(outside.directory().join("synthetic.svg"), b"outside").unwrap();
+        std::os::unix::fs::symlink(outside.directory(), root.directory().join("import-1-2-3")).unwrap();
+        std::fs::write(root.directory().join(".recents.json"), br#"[1,[["import-1-2-3","synthetic.svg"]]]"#).unwrap();
+        assert!(store.load().is_err());
     }
 }

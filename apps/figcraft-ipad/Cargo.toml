@@ -23,13 +23,15 @@ figcraft-doc = { workspace = true }
 figcraft-format = { workspace = true }
 figcraft-color = { workspace = true }
 egui = { workspace = true, features = ["figcraft-ipad-focus", "figcraft-ipad-clipboard"] }
-eframe = { workspace = true, features = ["default_fonts", "wgpu", "figcraft-ipad-clipboard"] }
+eframe = { workspace = true, features = ["default_fonts", "wgpu", "figcraft-ipad-focus", "figcraft-ipad-clipboard"] }
 image = { workspace = true }
 serde_json = { workspace = true }
 
 env_logger = { version = "0.11", default-features = false, features = ["auto-color", "humantime"] }
 
 [dev-dependencies]
+egui = { workspace = true, features = ["figcraft-ipad-focus", "figcraft-ipad-clipboard"] }
+figcraft-ui-egui = { workspace = true }
 figcraft-engine = { workspace = true }
 figcraft-recovery = { workspace = true }
 figcraft-apple-ipad = { path = "../../platform/apple-ipad" }

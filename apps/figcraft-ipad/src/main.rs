@@ -3,14 +3,20 @@
 mod app;
 #[cfg(target_os = "ios")]
 mod clipboard;
+#[cfg(test)]
+mod clipboard_tests;
 #[cfg(any(target_os = "ios", test))]
 mod documents;
 #[cfg(target_os = "ios")]
 mod lifecycle;
 #[cfg(any(target_os = "ios", test))]
 mod recovery;
+#[cfg(any(target_os = "ios", test))]
+mod saves;
 #[cfg(target_os = "ios")]
 mod services;
+#[cfg(any(target_os = "ios", test))]
+mod writes;
 
 #[cfg(target_os = "ios")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
