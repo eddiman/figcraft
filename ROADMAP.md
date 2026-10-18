@@ -8,9 +8,12 @@ keyboard-layout-guide query supplies geometry without new unsafe code.
 Shared UI tests pass 595/0/1 and both iOS target checks pass. Rendered
 600/800/1200-point layouts and supplied keyboard bounds were inspected.
 Full CI passes 2,576/0/9, including web and plugin WASM builds.
-Native keyboard/rotation attempts did not pass, so runtime keyboard avoidance,
-rotation and the physical touch-only walkthrough remain unqualified.
-T19 remains in review; T23 qualification was not repeated.
+Two T19-only native XCTest checks pass drawer open/close, rotation and toolbar
+avoidance above the visible software keyboard in portrait and landscape.
+Earlier failures also reproduced in Settings and cleared after a Simulator GUI
+restart with a temporary hardware-keyboard override; no production input fix
+was needed. T19 remains in review for the deferred physical touch-only
+walkthrough and keyboard variants. T23 qualification was not repeated.
 
 iPad automation checkpoint, 2026-10-18: T23 is complete. Hosted unsigned
 device/simulator jobs, Linux/workspace CI, web compilation and packaging lint

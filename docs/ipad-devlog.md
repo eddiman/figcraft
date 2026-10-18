@@ -1,6 +1,6 @@
 # Local iPad port development log
 
-## 2026-10-18: T19 responsive presentation, runtime review open
+## 2026-10-18: T19 responsive presentation, simulator checks complete
 
 The iPad host now opts into the shared T18 presentation policy. Wide layouts
 dock both shared panels, Medium docks Properties with a Layers/Assets drawer,
@@ -34,15 +34,26 @@ shared-editor host captured 24 layouts at
 bounds. The largest portrait request was limited by macOS to 1200x1387 points.
 These supplied rectangles are not native keyboard evidence.
 
-T19-only isolated XCTest attempts retained failures: the first reached the
+Earlier T19-only isolated XCTest attempts retained failures: the first reached the
 portrait drawer and focused field but reported a zero-height keyboard frame;
 later portrait requests left the app at 1180x820, preventing the intended
-rotation/drawer assertions. No native keyboard or rotation pass is claimed,
-and the cause is not established. Test installations were removed and the
-existing development app/container was preserved and relaunched. Clipboard and
-keyboard-capture settings were not changed. T23 qualification was not rerun.
-Native runtime investigation and physical touch-only editing remain open, so
-T19 is in review and no dependent development/release gate is released.
+rotation/drawer assertions. The system Settings app independently reproduced
+both hidden-keyboard and unchanged-orientation observations. A Simulator GUI
+restart with the process-only `-ConnectHardwareKeyboard NO` launch argument
+restored system rotation and a visible software keyboard. The combined
+intervention establishes an environment contribution, without isolating each
+setting's effect. No production text/input or event-loop change was needed.
+
+The final T19-only XCTest run passes both tests, without skips: portrait drawer
+open/close, landscape reflow and visible native keyboard avoidance in both
+orientations. Keyboard heights are 279 points in portrait and 364 in landscape;
+the Multi-select labels end above their respective keyboard top edges.
+The captured drawer and both native keyboard screenshots were inspected.
+The temporary GUI override was removed, persistent keyboard preferences were
+verified unchanged, and the original development app/container was preserved
+and relaunched. Clipboard contents were not accessed. T23 qualification was
+not rerun. Physical touch-only editing and floating/split keyboard qualification
+remain deferred, so T19 is in review and no dependent gate is released.
 
 ## 2026-10-18: T23 hosted qualification complete
 

@@ -29,6 +29,8 @@ scale and must not treat errors as a hidden keyboard.
 `src/geometry.rs` uses safe typed UIKit methods and has no unsafe-code exception,
 retained native state, callback or event-loop ownership. The UIKit features
 explicitly include `objc2-core-foundation` so isolated bridge checks do not rely
-on feature unification with the app. T19 simulator keyboard/rotation attempts
-did not pass; compilation and supplied-geometry screenshots do not qualify
-native keyboard avoidance or floating/split keyboard behavior.
+on feature unification with the app. T19's isolated native simulator checks
+confirm visible docked-keyboard avoidance in portrait and landscape after
+restoring simulator rotation/software-keyboard operation. Compilation and
+supplied-geometry screenshots alone are not native keyboard evidence.
+Physical-device and floating/split keyboard qualification remain deferred.
