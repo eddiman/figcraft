@@ -1,5 +1,17 @@
 # Local iPad port development log
 
+## 2026-10-18: T23 hosted qualification complete
+
+All five fork PR checks pass on `c1eff4e`: unsigned device and simulator jobs,
+Linux/workspace tests, WASM compilation and packaging lint. Hosted iPad CI
+run 39160778732 retains the passing editor XCTest and exactly one deliberate
+negative assertion, whose exit 65 is required by the workflow. Downloaded
+screenshots show typed `abc`, inspector X=10 and X=10 after cold restart with
+an empty field. The hosted destination was iPad (10th generation), iOS 26.1;
+the toolchain was Rust 1.98.1, Xcode 26.3 and SDK 26.2 on macOS 15.7.9.
+Linux CI run 39160778857 passes 2,563/0/8 on Rust 1.99.1; local full CI is
+2,568/0/9. T23 is done. No physical qualification, PR merge or release occurred.
+
 ## 2026-10-18: T23 current-stable atomic API compatibility
 
 The first hosted Linux Clippy job on Rust 1.99.1 rejected the downstream atomic allocators'

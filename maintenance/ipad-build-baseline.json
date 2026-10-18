@@ -11,7 +11,14 @@
     "targets": ["aarch64-apple-ios", "aarch64-apple-ios-sim"],
     "signing": "No device signing or release credentials; simulator ad hoc signatures only",
     "simulator_command": "packaging/ipad/test.sh simulator",
-    "remote_execution": "Not run; authorized downstream fork is eddiman/figcraft",
+    "remote_execution": "Passed in eddiman/figcraft: both unsigned builds, positive editor XCTest and intended negative assertion; host/web/packaging checks also passed",
+    "verified_commit": "c1eff4ee848d0409b2d34543f0575bd22f3e703f",
+    "remote_simulator": "iPad (10th generation), arm64, iOS 26.1 (23B86)",
+    "verified_runs": {
+      "ipad": "https://github.com/eddiman/figcraft/actions/runs/39160778732",
+      "host_and_web": "https://github.com/eddiman/figcraft/actions/runs/39160778857",
+      "packaging": "https://github.com/eddiman/figcraft/actions/runs/39160778739"
+    },
     "runner_inventory_source": "https://github.com/actions/runner-images/blob/main/images/macos/macos-15-arm64-Readme.md",
     "original_baseline_preserved_below": true
   },

@@ -1,13 +1,14 @@
 # FigCraft Roadmap
 
-Local iPad automation checkpoint, 2026-10-18: T23 adds an isolated XCTest
-simulator runner and unsigned device/simulator CI configuration. The real
-editor smoke covers field input, a fixture edit and cold restart with the
-edited position retained. Deliberate assertion failure propagates; eight
-runner regressions and both iOS builds pass. Full CI passes 2,568/0/9 after
-native-only cache cleanup resolved a low-disk server-test failure.
-Remote CI remains unverified pending execution in `eddiman/figcraft`; physical qualification
-is unchanged. No shared production code changed, and the full port is unfinished.
+iPad automation checkpoint, 2026-10-18: T23 is complete. Hosted unsigned
+device/simulator jobs, Linux/workspace CI, web compilation and packaging lint
+pass on `c1eff4e` in `eddiman/figcraft`. The isolated XCTest covers field input,
+an exact fixture edit and cold restart with the edited position retained;
+the separate deliberate assertion proves failure propagation. Local CI passes
+2,568/0/9 and hosted Linux tests pass 2,563/0/8. Qualification repaired a guarded
+directory change and renamed eight downstream atomic calls to the Rust
+1.95-compatible `try_update`, without changing runtime semantics or lint policy.
+Physical qualification is unchanged and the full port is unfinished.
 
 Local iPad persistence checkpoint, 2026-10-18: T10 now implements Save/Save As
 through captured snapshots, bounded/coalescing document workers and synchronized

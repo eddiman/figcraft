@@ -140,9 +140,13 @@ simulator checks. They require no signing credentials or release environment.
 Existing upstream Linux/wasm jobs are unchanged. The workflow is restricted to
 downstream repositories to preserve the original project's macOS runner policy.
 The authorized fork is `eddiman/figcraft` (`origin`); the original repository is
-preserved as `upstream`. Remote CI remains configured, not verified, until the
-workflow executes in the fork; local evidence does not certify hosted-runner
-execution.
+preserved as `upstream`. Hosted qualification passed at `c1eff4e` in
+[iPad CI run 39160778732](https://github.com/eddiman/figcraft/actions/runs/39160778732):
+both unsigned variants linked, the editor XCTest passed and the separate
+deliberate assertion returned the required failure. The selected hosted device
+was an iPad (10th generation) simulator running iOS 26.1. Linux/workspace CI,
+web compilation and packaging lint passed on the same commit. This does not
+qualify physical-device behavior or distribution.
 
 ## Native copy services (T07)
 
