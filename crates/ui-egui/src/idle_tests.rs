@@ -22,18 +22,18 @@ pub(crate) struct Harness {
     ctx: egui::Context,
     app: FigApp,
     time: f64,
+    size: egui::Vec2,
 }
 
 impl Harness {
     pub(crate) fn new(s: Session) -> Self {
-        Self { ctx: egui::Context::default(), app: FigApp::new(s, Box::new(NoServices)), time: 0.0 }
+        Self { ctx: egui::Context::default(), app: FigApp::new(s, Box::new(NoServices)), time: 0.0, size: vec2(1440.0, 900.0) }
     }
 
     /// One frame with `events`, 1/60 s after the last; returns the repaint delay it asked for.
     fn frame(&mut self, events: Vec<Event>) -> Duration {
         self.time += 1.0 / 60.0;
-        let input =
-            RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0))), time: Some(self.time), events, ..Default::default() };
+        let input = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, self.size)), time: Some(self.time), events, ..Default::default() };
         let app = &mut self.app;
         let mut out = self.ctx.run_ui(input, |ui| app.ui(ui));
         out.textures_delta.clear();
@@ -287,4 +287,92 @@ fn an_animated_gif_wakes_only_the_presenter_and_only_at_its_frames() {
     assert!(delays[5..].iter().any(|d| *d > Duration::from_millis(20)), "it doesn't draw every frame: {delays:?}");
     h.app.ui.present = None;
     h.assert_idle("the presenter closed");
+}
+
+#[test]
+fn ipad_idle_does_not_busy_loop() {
+    for size in [vec2(600.0, 900.0), vec2(800.0, 600.0), vec2(1200.0, 800.0)] {
+        let (mut h, _) = document();
+        h.size = size;
+        h.app.ui.adaptive.enabled = true;
+        h.app.ui.adaptive.multi_select = true;
+        h.assert_idle("adaptive editor with a latched modifier");
+    }
+}
+
+pub(crate) fn ipad_render_job() -> crate::render_worker::Job {
+    let mut session = Session::new();
+    session.execute("shape.rectangle", &json!({"x": 0, "y": 0, "width": 100, "height": 100})).unwrap();
+    let ds = session.ds().unwrap();
+    crate::render_worker::Job {
+        doc: ds.doc.clone(),
+        page: ds.page,
+        view: figcraft_render::View { origin: (0.0, 0.0), scale: 1.0, width: 120, height: 120 },
+        outline: false,
+        outline_extras: Default::default(),
+        outlined: vec![],
+        skip: vec![],
+        solo: None,
+        proof: false,
+    }
+}
+
+pub(crate) fn ipad_wait_for_worker(worker: &crate::render_worker::Worker) {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while worker.in_flight() {
+        assert!(Instant::now() < deadline, "the latest render never completed");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+#[test]
+fn ipad_render_queue_stays_bounded() {
+    let ctx = egui::Context::default();
+    let (entered, ready) = std::sync::mpsc::channel();
+    let (release, blocked) = std::sync::mpsc::channel();
+    let blocked = std::sync::Mutex::new(blocked);
+    let wakes = AtomicUsize::new(0);
+    ctx.set_request_repaint_callback(move |_| {
+        if wakes.fetch_add(1, Ordering::SeqCst) == 0 {
+            entered.send(()).unwrap();
+            blocked.lock().unwrap().recv_timeout(Duration::from_secs(20)).unwrap();
+        }
+    });
+    let mut worker = crate::render_worker::Worker::new(ctx);
+    let mut job = ipad_render_job();
+    worker.submit(job.clone());
+    ready.recv_timeout(Duration::from_secs(20)).unwrap();
+    for i in 1..=1000 {
+        job.view.origin.0 = f64::from(i);
+        worker.submit(job.clone());
+    }
+    let snapshots = Arc::strong_count(&job.doc);
+    release.send(()).unwrap();
+    ipad_wait_for_worker(&worker);
+    println!("T21 queued burst: 1000 submissions, {snapshots} retained snapshot references");
+    assert!(snapshots <= 8, "queued jobs retained {snapshots} snapshot references");
+    assert_eq!(worker.poll().unwrap().view.origin.0, 1000.0, "the newest view must eventually render");
+    assert!(worker.poll().is_none());
+}
+
+#[test]
+fn ipad_render_replacement_eventually_completes() {
+    let mut worker = crate::render_worker::Worker::new(egui::Context::default());
+    let mut job = ipad_render_job();
+    for i in 0..100 {
+        job.view.origin.0 = f64::from(i);
+        worker.submit(job.clone());
+        ipad_wait_for_worker(&worker);
+    }
+    assert_eq!(worker.poll().unwrap().view.origin.0, 99.0);
+    assert!(worker.poll().is_none());
+    job.view.scale = f64::NAN;
+    worker.submit(job.clone());
+    ipad_wait_for_worker(&worker);
+    assert!(worker.poll().is_none(), "invalid rendering must complete without fabricating an image");
+    job.view.scale = 1.0;
+    job.view.origin.0 = 123.0;
+    worker.submit(job);
+    ipad_wait_for_worker(&worker);
+    assert_eq!(worker.poll().unwrap().view.origin.0, 123.0, "a failed view cannot stall the next valid render");
 }

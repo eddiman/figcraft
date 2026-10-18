@@ -1,5 +1,27 @@
 # Local iPad port development log
 
+## 2026-10-19: T21 bounded render mailboxes and host profiling
+
+A deterministic paused-consumer regression exposed unbounded render-job
+retention: 1,000 submissions kept 1,003 document references. Native workers now
+use one pending job and one completed-image slot, with a bounded wake signal.
+The same burst retains four references. Raster work remains outside the mailbox
+lock on the existing worker thread, and intermediate completed images remain
+available while newer work is pending. Failure and viewport wakeup semantics
+are retained; shutdown clears queued resources without a UI-thread join.
+The web inline worker is unchanged.
+
+Four new regressions cover queue bounds/latest completion, failed-view recovery,
+completed-image retention/shutdown and adaptive idle behavior. A separately
+invoked ignored host diagnostic executes 20 in-memory editing/export cycles on
+each of four corpus cases. Detailed means and limitations are recorded in
+performance/README.md. These are host CPU observations, not device p95 or
+GPU presentation measurements. Full CI passes 2,580/0/10; both iOS target checks
+and a linked native simulator rendering/drawer/rotation smoke pass.
+The native screenshot was inspected. T23 qualification was not repeated.
+Memory-pressure integration requires a further scoped lifecycle/cache-ownership
+review; physical peak/settled memory and thermal qualification remain deferred.
+
 ## 2026-10-18: T19 responsive presentation, simulator checks complete
 
 The iPad host now opts into the shared T18 presentation policy. Wide layouts

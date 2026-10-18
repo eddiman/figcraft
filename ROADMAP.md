@@ -1,5 +1,14 @@
 # FigCraft Roadmap
 
+Local iPad rendering checkpoint, 2026-10-19: T21 bounds native rendering to
+one pending job and one completed image. The paused-consumer burst retains
+four document references instead of 1,003; latest-view completion, invalid-view
+recovery, shutdown and adaptive idle regressions pass. Eighty host diagnostic
+editing/export cycles are recorded in docs/ipad/performance, separately from
+iPad performance. Full CI passes 2,580/0/10, both iOS targets check, and a
+native simulator drawer/rotation rendering smoke passes. Physical performance,
+GPU presentation and memory-pressure integration remain open; T21 is review.
+
 Local iPad presentation checkpoint, 2026-10-18: T19 adds opt-in responsive
 shared panels, modal drawers, allocated touch controls and finger-only
 multi-select/constrain toggles. Layers and Assets retain existing command
