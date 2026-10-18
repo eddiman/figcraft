@@ -1,5 +1,11 @@
 # FigCraft Roadmap
 
+Local iPad integration preparation, 2026-10-19: T24 now records the integrated
+baseline, toolchain/font/dependency pins, ten patch intents and compatibility
+limits. The baseline remains an ancestor; 64 existing baseline files are
+modified at checkpoint 3495727. No newer upstream merge or hardware smoke was
+performed. T24 remains review; distribution and release gates are unchanged.
+
 Local iPad rendering checkpoint, 2026-10-19: T21 bounds native rendering to
 one pending job and one completed image. The paused-consumer burst retains
 four document references instead of 1,003; latest-view completion, invalid-view

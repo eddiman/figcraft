@@ -1,5 +1,17 @@
 # Local iPad port development log
 
+## 2026-10-19: T24 patch register and compatibility preparation
+
+Added maintenance/upstream.toml, maintenance/patches.md and
+docs/ipad/compatibility/README.md. The records name the integrated upstream,
+development checkpoint, archive version, toolchain/font/dependency pins,
+high-exposure shared seams, preserved invariants and patch retirement checks.
+The inventory identifies 64 modified existing baseline files, separately from
+additive native/vendor files. The recorded baseline remains an ancestor.
+No upstream fetch/merge, main/release change, workflow dispatch or hardware
+smoke was performed. T24 remains review for the actual integration rehearsal
+and required acceptance. The preparation does not rerun T23 qualification.
+
 ## 2026-10-19: T21 bounded render mailboxes and host profiling
 
 A deterministic paused-consumer regression exposed unbounded render-job

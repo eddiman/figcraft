@@ -1,0 +1,27 @@
+schema_version = 1
+recorded_on = "2026-10-19"
+upstream_repository = "https://github.com/storytold/figcraft.git"
+integrated_upstream = "102404e8c3d23d86c3490c1a6beff3202bb73e25"
+inventory_checkpoint = "3495727774cd9b231dd4af269ab08459f15e0782"
+development_branch = "ipad/baseline-fixtures"
+qualification = "development-only; no upstream merge rehearsal or device acceptance"
+modified_existing_files_at_checkpoint = 64
+archive_format_version = 1
+network_compatibility = "no new protocol version; cross-release server compatibility unqualified"
+rust_tested = "1.98.1"
+rust_minimum = "1.95"
+xcode_tested = "26.3"
+sdk_tested = "26.2"
+ios_deployment_floor = "17.0"
+font_profile = "maintenance/ipad-fonts.json"
+font_revision = "3d9ab3a132ed0eff457e424226a435a901da30d3"
+ordinary_development_fonts = "optional inputs absent; no device font-metric qualification"
+apple_bridge_version = "0.1.0"
+clipboard_bridge_version = "0.1.0"
+patch_register = "maintenance/patches.md"
+
+[dependency_overrides]
+egui = { version = "0.36.2", path = "maintenance/ipad-deps/egui" }
+egui-winit = { version = "0.36.2", path = "maintenance/ipad-deps/egui-winit" }
+eframe = { version = "0.36.2", path = "maintenance/ipad-deps/eframe" }
+winit = { version = "0.30.13", path = "maintenance/ipad-deps/winit" }
