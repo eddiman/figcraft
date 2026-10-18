@@ -1,5 +1,49 @@
 # Local iPad port development log
 
+## 2026-10-18: T19 responsive presentation, runtime review open
+
+The iPad host now opts into the shared T18 presentation policy. Wide layouts
+dock both shared panels, Medium docks Properties with a Layers/Assets drawer,
+and Narrow uses modal drawers. The canvas and document state are reused.
+Drawer activation cancels held canvas intent and excludes native canvas targets.
+Primary Save/Undo/Redo, tab close and error reporting remain reachable.
+Touch tools use the existing command catalog. Multi-select and Constrain merge
+Shift into finger contacts only, preserving physical mouse modifiers.
+
+Density-aware controls allocate larger rows and separate hit regions rather
+than inflating rectangles over adjacent controls. A compact tool row preserves
+44-point controls when supplied keyboard bounds leave little height.
+Shared panel commands reveal their drawer; Assets does not depend on the
+desktop icon rail. Desktop/browser presentation defaults remain unchanged.
+
+D19 records the bounded architecture review for a synchronous safe
+UIKeyboardLayoutGuide query. It tracks undocked geometry and disables the
+hidden keyboard's bottom-safe-area strip, converts to window points and returns
+owned numeric bounds. The host converts to egui points, cancels canvas intent
+on changes and explicitly reports unavailable geometry. There is no new unsafe
+allowance, observer, event loop, renderer or engine/document dependency.
+The isolated UIKit feature set now explicitly enables core-foundation support;
+the lock adds that existing-version dependency and dispatch2, with no upgrades.
+
+The UI suite passes 595 tests with one ignored, including eight new adaptive
+integration/control regressions. Both iOS target checks and isolated bridge
+checks pass. Explicit WASM and full CI pass, with 2,576 passed, zero failed and
+nine ignored across the full root/plugin run. An external GPU-rendered
+shared-editor host captured 24 layouts at
+600/800/1200 points, including both orientations, drawers and supplied keyboard
+bounds. The largest portrait request was limited by macOS to 1200x1387 points.
+These supplied rectangles are not native keyboard evidence.
+
+T19-only isolated XCTest attempts retained failures: the first reached the
+portrait drawer and focused field but reported a zero-height keyboard frame;
+later portrait requests left the app at 1180x820, preventing the intended
+rotation/drawer assertions. No native keyboard or rotation pass is claimed,
+and the cause is not established. Test installations were removed and the
+existing development app/container was preserved and relaunched. Clipboard and
+keyboard-capture settings were not changed. T23 qualification was not rerun.
+Native runtime investigation and physical touch-only editing remain open, so
+T19 is in review and no dependent development/release gate is released.
+
 ## 2026-10-18: T23 hosted qualification complete
 
 All five fork PR checks pass on `c1eff4e`: unsigned device and simulator jobs,

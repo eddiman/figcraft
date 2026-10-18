@@ -1,5 +1,5 @@
 //! Pure iPad presentation policy. Callers keep panel preferences and native geometry.
-//! Desktop panel fitting remains independent. T19 connects these choices to shared panels.
+//! Desktop panel fitting remains independent.
 use egui::{Rect, Vec2, pos2, vec2};
 
 use crate::{CANVAS_MIN, LEFT_PANEL, PANEL_DEFAULT, RIGHT_PANEL};
@@ -26,6 +26,190 @@ pub enum InputDensity {
 pub enum PanelSide {
     Left,
     Right,
+}
+
+#[derive(Default)]
+pub struct Presentation {
+    pub enabled: bool,
+    /// Window-point geometry supplied by the native host, never inferred from safe areas.
+    pub keyboard: Option<Rect>,
+    pub drawer: Option<PanelSide>,
+    pub multi_select: bool,
+    pub constrain: bool,
+    pub last_layout: Option<Layout>,
+    pub(crate) actions: Vec<(&'static str, Rect)>,
+}
+
+impl Presentation {
+    pub fn finger_modifiers(&self, mut physical: egui::Modifiers) -> egui::Modifiers {
+        if self.enabled {
+            physical.shift |= self.multi_select || self.constrain;
+        }
+        physical
+    }
+}
+
+pub fn touch(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<bool>(egui::Id::new("ipad_touch_density"))).unwrap_or(false)
+}
+
+pub fn target_size(ui: &egui::Ui, pointer: f32) -> f32 {
+    if touch(ui.ctx()) { pointer.max(44.0) } else { pointer }
+}
+
+pub(crate) fn button(app: &mut crate::FigApp, ui: &mut egui::Ui, key: &'static str, label: &str, selected: bool) -> bool {
+    let response = ui.add(egui::Button::new(label).selected(selected).min_size(vec2(44.0, 44.0)));
+    app.ui.adaptive.actions.push((key, response.rect.intersect(ui.clip_rect())));
+    response.clicked()
+}
+
+pub(crate) fn drawer(app: &mut crate::FigApp, side: Option<PanelSide>) {
+    if app.ui.adaptive.drawer != side {
+        app.cancel_canvas_pointer();
+        app.ui.adaptive.drawer = side;
+    }
+}
+
+pub(crate) fn reveal_panel(app: &mut crate::FigApp, side: PanelSide) {
+    if side == PanelSide::Left {
+        app.ui.left_collapsed = false;
+    }
+    if app.ui.adaptive.last_layout.is_some_and(|policy| {
+        let presentation = if side == PanelSide::Left { policy.left } else { policy.right };
+        matches!(presentation, PanelPresentation::Drawer { .. }) || (presentation == PanelPresentation::Hidden && policy.mode != LayoutMode::Wide)
+    }) {
+        drawer(app, Some(side));
+    } else {
+        app.ui.nav.go(if side == PanelSide::Left { crate::a11y::Region::Layers } else { crate::a11y::Region::Properties });
+    }
+}
+
+fn panel(app: &mut crate::FigApp, ui: &mut egui::Ui, side: PanelSide) {
+    use crate::{a11y, i18n::tr};
+    let (region, label) = match side {
+        PanelSide::Left => (a11y::Region::Layers, tr("Layers")),
+        PanelSide::Right => (a11y::Region::Properties, tr("Properties")),
+    };
+    a11y::region(&mut app.ui.nav, ui, region, egui::accesskit::Role::Pane, label);
+    match side {
+        PanelSide::Left => crate::layers::left_panel(app, ui),
+        PanelSide::Right => crate::right::right_panel(app, ui),
+    }
+}
+
+pub(crate) fn show(app: &mut crate::FigApp, ui: &mut egui::Ui, hidden: bool) {
+    use crate::{i18n::tr, theme::Tokens};
+    use serde_json::json;
+    let ctx = ui.ctx().clone();
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("ipad_touch_density"), true));
+    ui.spacing_mut().interact_size = vec2(44.0, 44.0);
+    app.ui.adaptive.actions.clear();
+    let full = ui.available_rect_before_wrap().intersect(ctx.content_rect());
+    let policy = layout(&LayoutInput {
+        window_size: full.size(),
+        safe_insets: SafeInsets::default(),
+        keyboard: app.ui.adaptive.keyboard.map(|r| r.translate(-full.min.to_vec2())),
+        density: InputDensity::Touch,
+        panel_widths: (app.ui.left_width.max(360.0), app.ui.right_width.max(360.0)),
+        left_visible: !hidden && !app.ui.left_collapsed,
+        right_visible: !hidden,
+        medium_panel: PanelSide::Right,
+    });
+    let available = policy.available.translate(full.min.to_vec2());
+    if app.ui.adaptive.last_layout.is_some_and(|old| old != policy) {
+        app.cancel_canvas_pointer();
+    }
+    app.ui.adaptive.last_layout = Some(policy);
+    if let Some(side) = app.ui.adaptive.drawer {
+        let presentation = match side {
+            PanelSide::Left => policy.left,
+            PanelSide::Right => policy.right,
+        };
+        if !matches!(presentation, PanelPresentation::Drawer { .. }) {
+            drawer(app, None);
+        }
+    }
+    let t = Tokens::get(&ctx);
+    ui.scope_builder(egui::UiBuilder::new().max_rect(available), |ui| {
+        crate::tabs::tab_bar(app, ui);
+        if !hidden {
+            egui::Panel::top("ipad_primary").exact_size(44.0).frame(egui::Frame::NONE.fill(t.panel)).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    for (key, label, command) in
+                        [("save", tr("Save"), "file.save"), ("undo", tr("Undo"), "edit.undo"), ("redo", tr("Redo"), "edit.redo")]
+                    {
+                        if button(app, ui, key, label, false) {
+                            app.run(command, json!({}));
+                        }
+                    }
+                    for (key, label, command) in [("layers", tr("Layers"), "view.layers"), ("assets", tr("Assets"), "view.assets")] {
+                        if button(app, ui, key, label, false) {
+                            app.run(command, json!({}));
+                        }
+                    }
+                    if button(app, ui, "properties", tr("Properties"), app.ui.adaptive.drawer == Some(PanelSide::Right)) {
+                        reveal_panel(app, PanelSide::Right);
+                    }
+                    if button(app, ui, "actions", tr("Actions"), false) {
+                        app.cancel_canvas_pointer();
+                        app.ui.palette = Some(String::new());
+                    }
+                });
+            });
+            let compact = available.height() < 300.0;
+            egui::Panel::bottom("ipad_tools").exact_size(if compact { 46.0 } else { 100.0 }).frame(egui::Frame::NONE.fill(t.panel)).show(ui, |ui| {
+                crate::a11y::region(&mut app.ui.nav, ui, crate::a11y::Region::Toolbar, egui::accesskit::Role::Toolbar, tr("Tools"));
+                crate::toolbar::touch_show(app, ui, compact);
+            });
+        }
+        for (side, presentation) in [(PanelSide::Left, policy.left), (PanelSide::Right, policy.right)] {
+            if let PanelPresentation::Docked { bounds } = presentation {
+                let dock = match side {
+                    PanelSide::Left => egui::Panel::left("ipad_left"),
+                    PanelSide::Right => egui::Panel::right("ipad_right"),
+                };
+                dock.exact_size(bounds.width()).resizable(false).frame(egui::Frame::NONE.fill(t.panel)).show(ui, |ui| panel(app, ui, side));
+            }
+        }
+        egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.canvas)).show(ui, |ui| {
+            if app.ui.adaptive.drawer.is_some() {
+                ui.disable();
+            }
+            let mut worker = app.worker.take().unwrap_or_else(|| crate::render_worker::Worker::new(ctx.clone()));
+            crate::canvas::show(app, ui, &mut worker);
+            app.worker = Some(worker);
+        });
+    });
+    if let Some(side) = app.ui.adaptive.drawer {
+        let width = match side {
+            PanelSide::Left => app.ui.left_width,
+            PanelSide::Right => app.ui.right_width,
+        };
+        let width = width.max(360.0).min((available.width() - 24.0).max(0.0));
+        let position = pos2(if side == PanelSide::Left { available.left() } else { available.right() - width }, available.top());
+        let id = egui::Id::new(("ipad_drawer", side == PanelSide::Left));
+        let response = egui::Modal::new(id)
+            .area(
+                egui::Modal::default_area(id)
+                    .anchor(egui::Align2::LEFT_TOP, position.to_vec2() - ctx.content_rect().min.to_vec2())
+                    .default_size(vec2(width, available.height()))
+                    .constrain_to(available),
+            )
+            .frame(egui::Frame::NONE.fill(t.panel))
+            .show(&ctx, |ui| {
+                ui.set_width(width);
+                ui.set_height(available.height());
+                if button(app, ui, "close_drawer", tr("Close panel"), false) {
+                    drawer(app, None);
+                }
+                egui::ScrollArea::vertical().id_salt("drawer_scroll").max_height((available.height() - 52.0).max(0.0)).show(ui, |ui| {
+                    panel(app, ui, side);
+                });
+            });
+        if response.should_close() {
+            drawer(app, None);
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]

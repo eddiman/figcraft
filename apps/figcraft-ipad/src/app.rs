@@ -31,11 +31,40 @@ struct Shell {
     smoke: bool,
     recovery: crate::recovery::Shared,
     _lifecycle: figcraft_apple_ipad::LifecycleHost,
+    geometry_error: Option<String>,
 }
 
 impl eframe::App for Shell {
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
-        let frame = figcraft_ui_egui::windows::with_app(|fig| self.input.process(fig, ctx, raw)).unwrap_or_else(|| self.input.unavailable(ctx, raw));
+        let geometry_available = match figcraft_apple_ipad::keyboard_bounds() {
+            Ok(bounds) => {
+                self.geometry_error = None;
+                let keyboard = bounds.map(|[x0, y0, x1, y1]| {
+                    let scale = ctx.native_pixels_per_point().unwrap_or(1.0) / ctx.pixels_per_point();
+                    egui::Rect::from_min_max(egui::pos2(x0, y0) * scale, egui::pos2(x1, y1) * scale)
+                });
+                figcraft_ui_egui::windows::with_app(|fig| {
+                    if fig.ui.adaptive.keyboard != keyboard {
+                        fig.cancel_canvas_pointer();
+                        fig.ui.adaptive.keyboard = keyboard;
+                    }
+                });
+                true
+            }
+            Err(error) => {
+                if self.geometry_error.as_ref() != Some(&error) {
+                    log::warn!("Keyboard geometry unavailable: {error}");
+                    self.geometry_error = Some(error);
+                }
+                figcraft_ui_egui::windows::with_app(|fig| fig.cancel_canvas_pointer());
+                false
+            }
+        };
+        let frame = if geometry_available {
+            figcraft_ui_egui::windows::with_app(|fig| self.input.process(fig, ctx, raw)).unwrap_or_else(|| self.input.unavailable(ctx, raw))
+        } else {
+            self.input.unavailable(ctx, raw)
+        };
         for issue in frame.issues {
             log::warn!("Unsupported native touch sequence: {issue:?}");
         }
@@ -74,6 +103,9 @@ impl eframe::App for Shell {
             }
             let completed = figcraft_ui_egui::windows::guard(fig, &ctx, |fig| fig.ui(ui));
             self.input.finish_frame(fig, &ctx, completed);
+            if fig.ui.adaptive.keyboard.is_some() || figcraft_ui_egui::a11y::field_focused(&ctx) {
+                ctx.request_repaint_after(std::time::Duration::from_millis(100));
+            }
             if completed {
                 fig.services.save_prefs(&fig.session.prefs);
             }
@@ -116,6 +148,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
         fig.toast("Recovered your unsaved work.");
     }
     fig.ui.home = false;
+    fig.ui.adaptive.enabled = true;
     figcraft_ui_egui::touch_native::Native::enable(&mut fig);
     figcraft_ui_egui::windows::install(fig);
     let mut options = eframe::NativeOptions { renderer: eframe::Renderer::Wgpu, ..Default::default() };
@@ -149,6 +182,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
                 smoke,
                 recovery,
                 _lifecycle: lifecycle,
+                geometry_error: None,
             }))
         }),
     )?;

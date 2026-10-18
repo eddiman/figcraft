@@ -13,6 +13,10 @@ pub const ROW_H: f32 = 32.0;
 pub const FIELD_H: f32 = 24.0;
 pub const PAD: f32 = 16.0;
 
+pub fn field_height(ui: &Ui) -> f32 {
+    crate::adaptive::target_size(ui, FIELD_H)
+}
+
 /// What a numeric field's label shows: text ("X") or an icon with the field's name (for screen
 /// readers: an icon doesn't say which property it is).
 #[derive(Clone, Copy)]
@@ -163,7 +167,7 @@ fn number_field_impl(
     empty: &str,
 ) -> (Option<Edit>, Option<BindEvent>) {
     let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(vec2(width, FIELD_H), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(vec2(width, field_height(ui)), Sense::hover());
     if let Some(Some(name)) = binding {
         return (None, bound_field(ui, id, lead, rect, name));
     }
@@ -173,8 +177,10 @@ fn number_field_impl(
         Lead::Text(s) => (12.0 + s.chars().count() as f32 * 7.0).max(24.0),
         Lead::Icon(..) => 24.0,
     };
-    let lead_rect = Rect::from_min_size(rect.min, vec2(lead_w, FIELD_H));
-    let edit_rect = Rect::from_min_max(pos2(rect.min.x + lead_w, rect.min.y), rect.max);
+    let lead_w = if matches!(lead, Lead::None | Lead::Named(_)) { lead_w } else { crate::adaptive::target_size(ui, lead_w) };
+    let lead_rect = Rect::from_min_size(rect.min, vec2(lead_w, rect.height()));
+    let binding_width = if crate::adaptive::touch(ui.ctx()) && binding.is_some() { 44.0 } else { 0.0 };
+    let edit_rect = Rect::from_min_max(pos2(rect.min.x + lead_w, rect.min.y), pos2(rect.right() - binding_width, rect.bottom()));
     let editing_id = id.with("editing");
     let mut editing: Option<String> = ui.data(|d| d.get_temp(editing_id));
     let field_resp = ui.interact(edit_rect, id.with("field"), Sense::click());
@@ -346,13 +352,18 @@ fn number_field_impl(
     // The variable button shows while the pointer is over a bindable field.
     let mut bind = None;
     if binding.is_some() && ui.data(|d| d.get_temp::<String>(editing_id)).is_none() {
-        let br = Rect::from_center_size(pos2(rect.max.x - 11.0, rect.center().y), vec2(18.0, 18.0));
+        let size = crate::adaptive::target_size(ui, 18.0);
+        let offset = if crate::adaptive::touch(ui.ctx()) { size / 2.0 } else { 11.0 };
+        let br = Rect::from_center_size(pos2(rect.max.x - offset, rect.center().y), vec2(size, size));
         let bresp = ui.interact(br, id.with("bind"), Sense::click());
-        if bresp.has_focus() || rect.contains(ui.input(|i| i.pointer.hover_pos()).unwrap_or(egui::Pos2::new(f32::NAN, f32::NAN))) {
+        if crate::adaptive::touch(ui.ctx())
+            || bresp.has_focus()
+            || rect.contains(ui.input(|i| i.pointer.hover_pos()).unwrap_or(egui::Pos2::new(f32::NAN, f32::NAN)))
+        {
             if bresp.hovered() {
                 ui.painter().rect_filled(br, CornerRadius::same(4), t.hover);
             }
-            icons::paint(ui.painter(), br.shrink(3.0), Icon::Variable, t.icon_secondary);
+            icons::paint(ui.painter(), Rect::from_center_size(br.center(), vec2(12.0, 12.0)), Icon::Variable, t.icon_secondary);
         }
         let bresp = bresp.tip(tr("Apply variable"));
         if bresp.clicked() {
@@ -384,7 +395,9 @@ pub fn bound_field(ui: &mut Ui, id: Id, lead: Lead, rect: Rect, name: &str) -> O
             24.0
         }
     };
-    let dr = Rect::from_center_size(pos2(rect.max.x - 11.0, rect.center().y), vec2(18.0, 18.0));
+    let size = crate::adaptive::target_size(ui, 18.0);
+    let offset = if crate::adaptive::touch(ui.ctx()) { size / 2.0 } else { 11.0 };
+    let dr = Rect::from_center_size(pos2(rect.max.x - offset, rect.center().y), vec2(size, size));
     let chip = Rect::from_min_max(pos2(rect.min.x + lead_w - 2.0, rect.min.y + 3.0), pos2(dr.min.x - 2.0, rect.max.y - 3.0));
     ui.painter().rect_filled(chip, CornerRadius::same(4), t.hover);
     ui.painter().rect_stroke(chip, CornerRadius::same(4), Stroke::new(1.0, t.border), StrokeKind::Inside);
@@ -397,7 +410,7 @@ pub fn bound_field(ui: &mut Ui, id: Id, lead: Lead, rect: Rect, name: &str) -> O
         if dresp.hovered() {
             ui.painter().rect_filled(dr, CornerRadius::same(4), t.hover);
         }
-        icons::paint(ui.painter(), dr.shrink(3.0), Icon::Detach, t.icon_secondary);
+        icons::paint(ui.painter(), Rect::from_center_size(dr.center(), vec2(12.0, 12.0)), Icon::Detach, t.icon_secondary);
     }
     if dresp.clicked() {
         return Some(BindEvent::Detach);
@@ -408,13 +421,13 @@ pub fn bound_field(ui: &mut Ui, id: Id, lead: Lead, rect: Rect, name: &str) -> O
 
 /// A text field that commits on Enter / focus loss. Returns the new text when committed.
 pub fn text_field(ui: &mut Ui, id: Id, value: &str, width: f32, placeholder: &str) -> Option<String> {
-    let (rect, _) = ui.allocate_exact_size(vec2(width, FIELD_H), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(vec2(width, field_height(ui)), Sense::hover());
     text_field_in(ui, id, value, rect, placeholder, placeholder)
 }
 
 /// [`text_field`] without a placeholder, named `name` for screen readers (its label is beside it).
 pub fn text_field_named(ui: &mut Ui, id: Id, value: &str, width: f32, name: &str) -> Option<String> {
-    let (rect, _) = ui.allocate_exact_size(vec2(width, FIELD_H), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(vec2(width, field_height(ui)), Sense::hover());
     text_field_in(ui, id, value, rect, "", name)
 }
 
@@ -456,7 +469,7 @@ pub fn multiline_field(ui: &mut Ui, id: Id, value: &str, hint: &str, rows: usize
 /// Returns the typed text (on Enter / focus loss) or the option picked.
 pub fn combo_field(ui: &mut Ui, id: Id, value: &str, width: f32, options: &[String]) -> Option<String> {
     let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(vec2(width, FIELD_H), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(vec2(width, field_height(ui)), Sense::hover());
     let mut out = text_field_in(ui, id, value, rect, "", "");
     // The chevron sits on top of the field's right end.
     let chev = Rect::from_min_max(pos2(rect.max.x - 18.0, rect.min.y), rect.max);
@@ -542,7 +555,7 @@ fn field_editor(ui: &mut Ui, rect: Rect, id: Id, text: &mut String, hint: &str) 
 /// row. Returns the editor's response (name it for screen readers with `a11y::text`).
 pub fn text_input(ui: &mut Ui, id: Id, text: &mut String, width: f32, hint: &str) -> Response {
     let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(vec2(width, FIELD_H), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(vec2(width, field_height(ui)), Sense::hover());
     ui.painter().rect_filled(rect, CornerRadius::same(5), t.field);
     let r = field_editor(ui, rect, id, text, hint);
     if r.has_focus() {
@@ -578,7 +591,7 @@ pub fn dropdown(ui: &mut Ui, label: &str, width: f32, lead: Option<Icon>) -> Res
 /// [`dropdown`] with an icon or a colour dot before the label.
 pub fn dropdown_lead(ui: &mut Ui, label: &str, width: f32, lead: Option<DropLead>) -> Response {
     let t = Tokens::get(ui.ctx());
-    let (rect, resp) = ui.allocate_exact_size(vec2(width, FIELD_H), Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(vec2(width, field_height(ui)), Sense::click());
     a11y::combo(&resp, "", label, a11y::menu_open(&resp));
     let bg = t.field;
     ui.painter().rect_filled(rect, CornerRadius::same(5), bg);
@@ -673,12 +686,13 @@ fn segments(
     paint: impl Fn(&Ui, Rect, usize, bool, &Tokens),
 ) -> Option<usize> {
     let t = Tokens::get(ui.ctx());
+    let cell = crate::adaptive::target_size(ui, cell);
     let w = cell * names.len() as f32;
-    let (rect, _) = ui.allocate_exact_size(vec2(w, FIELD_H), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(vec2(w, field_height(ui)), Sense::hover());
     ui.painter().rect_filled(rect, CornerRadius::same(5), t.field);
     let mut out = None;
     for (i, name) in names.iter().enumerate() {
-        let r = Rect::from_min_size(pos2(rect.min.x + i as f32 * cell, rect.min.y), vec2(cell, FIELD_H));
+        let r = Rect::from_min_size(pos2(rect.min.x + i as f32 * cell, rect.min.y), vec2(cell, rect.height()));
         let mut resp = ui.interact(r, ui.id().with(("seg", i, *name)), Sense::click());
         if tips {
             resp = resp.on_hover_text(*name);
@@ -703,7 +717,7 @@ fn segments(
 pub fn disclosure(ui: &mut Ui, label: &str, open: bool) -> bool {
     let t = Tokens::get(ui.ctx());
     let galley = ui.painter().layout_no_wrap(label.to_string(), regular(11.0), t.text_secondary);
-    let (rect, resp) = ui.allocate_exact_size(vec2(galley.size().x + 22.0, FIELD_H), Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(vec2(galley.size().x + 22.0, field_height(ui)), Sense::click());
     a11y::disclosure(&resp, label, open);
     if resp.hovered() {
         ui.painter().rect_filled(rect, CornerRadius::same(4), t.hover);
@@ -719,7 +733,8 @@ pub fn disclosure(ui: &mut Ui, label: &str, open: bool) -> bool {
 pub fn section_header(ui: &mut Ui, title: &str, buttons: &[(Icon, &str)], dim: bool) -> Option<usize> {
     let t = Tokens::get(ui.ctx());
     let w = ui.available_width();
-    let (rect, _) = ui.allocate_exact_size(vec2(w, 40.0), Sense::hover());
+    let cell = crate::adaptive::target_size(ui, 24.0);
+    let (rect, _) = ui.allocate_exact_size(vec2(w, crate::adaptive::target_size(ui, 40.0)), Sense::hover());
     ui.painter().text(
         pos2(rect.min.x + PAD, rect.center().y),
         Align2::LEFT_CENTER,
@@ -730,7 +745,7 @@ pub fn section_header(ui: &mut Ui, title: &str, buttons: &[(Icon, &str)], dim: b
     let mut out = None;
     let mut x = rect.max.x - 8.0;
     for (i, (icon, tip)) in buttons.iter().enumerate().rev() {
-        let r = Rect::from_min_size(pos2(x - 24.0, rect.center().y - 12.0), vec2(24.0, 24.0));
+        let r = Rect::from_min_size(pos2(x - cell, rect.center().y - cell / 2.0), vec2(cell, cell));
         let resp = ui.interact(r, ui.id().with(("hdr", title, i)), Sense::click()).tip(*tip);
         if resp.hovered() {
             ui.painter().rect_filled(r, CornerRadius::same(5), t.hover);
@@ -739,7 +754,7 @@ pub fn section_header(ui: &mut Ui, title: &str, buttons: &[(Icon, &str)], dim: b
         if resp.clicked() {
             out = Some(i);
         }
-        x -= 24.0;
+        x -= cell;
     }
     out
 }
@@ -757,7 +772,8 @@ pub fn icon_button_at(ui: &mut Ui, id: Id, rect: Rect, icon: Icon, tip: &str) ->
 
 /// A 24×24 icon button laid out in place; true when clicked.
 pub fn icon_button(ui: &mut Ui, icon: Icon, tip: &str) -> bool {
-    let (rect, _) = ui.allocate_exact_size(vec2(24.0, 24.0), Sense::hover());
+    let cell = crate::adaptive::target_size(ui, 24.0);
+    let (rect, _) = ui.allocate_exact_size(vec2(cell, cell), Sense::hover());
     let id = ui.id().with(("icon_button", tip));
     icon_button_at(ui, id, rect, icon, tip)
 }
@@ -831,6 +847,7 @@ pub fn checker(painter: &egui::Painter, rect: Rect, cell: f32) {
 
 /// A paint swatch (with checkerboard under transparent colours).
 pub fn swatch(ui: &mut Ui, paint: &figcraft_color::Paint, size: f32) -> Response {
+    let size = crate::adaptive::target_size(ui, size);
     let (rect, resp) = ui.allocate_exact_size(vec2(size, size), Sense::click());
     // The value is only spelled out while a screen reader reads the tree.
     let value = if a11y::active(&resp.ctx) { paint_name(paint) } else { String::new() };
@@ -891,7 +908,7 @@ pub fn paint_swatch(painter: &egui::Painter, rect: Rect, paint: &figcraft_color:
 /// A small checkbox with label.
 pub fn checkbox(ui: &mut Ui, on: bool, label: &str) -> bool {
     let t = Tokens::get(ui.ctx());
-    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width().min(200.0), FIELD_H), Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width().min(200.0), field_height(ui)), Sense::click());
     a11y::checkbox(&resp, label, on);
     let b = Rect::from_min_size(pos2(rect.min.x, rect.center().y - 7.0), vec2(14.0, 14.0));
     if on {
@@ -907,7 +924,7 @@ pub fn checkbox(ui: &mut Ui, on: bool, label: &str) -> bool {
 /// A radio button with label; returns whether it was clicked.
 pub fn radio(ui: &mut Ui, on: bool, label: &str) -> bool {
     let t = Tokens::get(ui.ctx());
-    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width().min(240.0), FIELD_H), Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width().min(240.0), field_height(ui)), Sense::click());
     a11y::radio(&resp, label, on);
     let c = pos2(rect.min.x + 7.0, rect.center().y);
     if on {
@@ -926,7 +943,7 @@ pub fn button(ui: &mut Ui, label: &str, primary: bool, enabled: bool) -> Respons
     let t = Tokens::get(ui.ctx());
     let galley = ui.painter().layout_no_wrap(label.to_string(), regular(11.0), t.text);
     let sense = if enabled { Sense::click() } else { Sense::hover() };
-    let (rect, resp) = ui.allocate_exact_size(vec2(galley.size().x + 24.0, FIELD_H), sense);
+    let (rect, resp) = ui.allocate_exact_size(vec2(crate::adaptive::target_size(ui, galley.size().x + 24.0), field_height(ui)), sense);
     a11y::button(&resp, label);
     let hot = enabled && resp.hovered();
     let (fill, text) = match (primary, hot) {

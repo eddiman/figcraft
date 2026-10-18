@@ -97,14 +97,21 @@ impl Finger {
     }
     fn apply(&mut self, app: &mut FigApp, ctx: &Context, outputs: Vec<Output>) {
         for output in outputs {
+            let modifiers = |contact: &Contact| app.ui.adaptive.finger_modifiers(contact.modifiers);
             let result = match output {
-                Output::Begin(contact) => app
-                    .begin_canvas_pointer(ctx)
-                    .and_then(|()| crate::canvas::pointer_value(app, ctx, PointerKind::Down, contact.position, contact.modifiers, contact.pressure)),
-                Output::Move(contact) => {
-                    crate::canvas::pointer_value(app, ctx, PointerKind::Move, contact.position, contact.modifiers, contact.pressure)
+                Output::Begin(contact) => {
+                    let modifiers = modifiers(&contact);
+                    app.begin_canvas_pointer(ctx)
+                        .and_then(|()| crate::canvas::pointer_value(app, ctx, PointerKind::Down, contact.position, modifiers, contact.pressure))
                 }
-                Output::Up(contact) => crate::canvas::pointer_value(app, ctx, PointerKind::Up, contact.position, contact.modifiers, contact.pressure),
+                Output::Move(contact) => {
+                    let modifiers = modifiers(&contact);
+                    crate::canvas::pointer_value(app, ctx, PointerKind::Move, contact.position, modifiers, contact.pressure)
+                }
+                Output::Up(contact) => {
+                    let modifiers = modifiers(&contact);
+                    crate::canvas::pointer_value(app, ctx, PointerKind::Up, contact.position, modifiers, contact.pressure)
+                }
                 Output::Finish => app.finish_canvas_pointer().map(|_| ()),
                 Output::Cancel => {
                     app.cancel_canvas_pointer();

@@ -152,14 +152,20 @@ pub fn left_panel(app: &mut FigApp, ui: &mut Ui) {
         }
         ui.painter().text(pos2(head.min.x + 16.0, head.min.y + 46.0), Align2::LEFT_CENTER, tr("Drafts"), regular(11.0), t.text_secondary);
     }
-    let hr = Rect::from_center_size(pos2(head.max.x - 24.0, head.min.y + 24.0), vec2(24.0, 24.0));
+    let cell = crate::adaptive::target_size(ui, 24.0);
+    let hr = Rect::from_center_size(pos2(head.max.x - cell / 2.0, head.min.y + 24.0), vec2(cell, cell));
     let hresp = ui.interact(hr, ui.id().with("hideui"), Sense::click()).tip(tr("Collapse panel"));
     if hresp.hovered() {
         ui.painter().rect_filled(hr, CornerRadius::same(5), t.hover);
     }
-    icons::paint(ui.painter(), hr.shrink(5.0), Icon::Panels, t.icon);
+    icons::paint(ui.painter(), Rect::from_center_size(hr.center(), vec2(14.0, 14.0)), Icon::Panels, t.icon);
     if hresp.clicked() {
-        app.ui.left_collapsed = true;
+        if app.ui.adaptive.enabled {
+            crate::adaptive::drawer(app, None);
+            app.ui.left_collapsed = true;
+        } else {
+            app.ui.left_collapsed = true;
+        }
     }
     ui.painter().line_segment([head.left_bottom(), head.right_bottom()], Stroke::new(1.0, t.border));
     match app.ui.left_tab {
@@ -174,14 +180,18 @@ pub fn left_panel(app: &mut FigApp, ui: &mut Ui) {
 fn pages(app: &mut FigApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let w = ui.available_width();
-    let (hr, _) = ui.allocate_exact_size(vec2(w, 40.0), Sense::hover());
-    let tresp = ui.interact(Rect::from_min_size(hr.min, vec2(w - 40.0, 40.0)), ui.id().with("pages_toggle"), Sense::click());
+    let cell = crate::adaptive::target_size(ui, 24.0);
+    let h = crate::adaptive::target_size(ui, 40.0);
+    let (hr, _) = ui.allocate_exact_size(vec2(w, h), Sense::hover());
+    let toggle_w = if app.ui.adaptive.enabled { w - 2.0 * cell } else { w - 40.0 };
+    let tresp = ui.interact(Rect::from_min_size(hr.min, vec2(toggle_w, h)), ui.id().with("pages_toggle"), Sense::click());
     a11y::toggle(&tresp, tr("Pages"), app.ui.pages_open);
     ui.painter().text(pos2(hr.min.x + 16.0, hr.center().y), Align2::LEFT_CENTER, tr("Pages"), semibold(11.0), t.text);
     if tresp.clicked() {
         app.ui.pages_open = !app.ui.pages_open;
     }
-    let sr = Rect::from_center_size(pos2(hr.max.x - 50.0, hr.center().y), vec2(24.0, 24.0));
+    let sx = if app.ui.adaptive.enabled { hr.max.x - 1.5 * cell } else { hr.max.x - 50.0 };
+    let sr = Rect::from_center_size(pos2(sx, hr.center().y), vec2(cell, cell));
     let sresp = ui.interact(sr, ui.id().with("lsearch"), Sense::click()).tip(crate::shortcuts::tip(tr("Find"), "edit.findReplace"));
     if sresp.hovered() {
         ui.painter().rect_filled(sr, CornerRadius::same(5), t.hover);
@@ -190,7 +200,8 @@ fn pages(app: &mut FigApp, ui: &mut Ui) {
     if sresp.clicked() {
         app.ui.find = Some((String::new(), String::new()));
     }
-    let ar = Rect::from_center_size(pos2(hr.max.x - 22.0, hr.center().y), vec2(24.0, 24.0));
+    let ax = if app.ui.adaptive.enabled { hr.max.x - cell / 2.0 } else { hr.max.x - 22.0 };
+    let ar = Rect::from_center_size(pos2(ax, hr.center().y), vec2(cell, cell));
     let aresp = ui.interact(ar, ui.id().with("addpage"), Sense::click()).tip(tr("Add new page"));
     if aresp.hovered() {
         ui.painter().rect_filled(ar, CornerRadius::same(5), t.hover);
@@ -216,7 +227,7 @@ fn pages(app: &mut FigApp, ui: &mut Ui) {
     // Pages are dragged up and down the list to reorder them.
     let mut reorder = crate::list_drag::ListDrag::in_order(ui, "pages");
     for (k, (id, name, divider)) in pages.iter().cloned().enumerate() {
-        let (r, resp) = ui.allocate_exact_size(vec2(w, 32.0), Sense::click_and_drag());
+        let (r, resp) = ui.allocate_exact_size(vec2(w, crate::adaptive::target_size(ui, 32.0)), Sense::click_and_drag());
         reorder.row_by(&resp, k, r, || if divider { tr("Divider").to_string() } else { name.clone() });
         a11y::list_item(&resp, if divider { tr("Divider") } else { &name }, id == cur);
         let r = r.shrink2(vec2(8.0, 0.0));
@@ -540,7 +551,11 @@ fn row_x0(rr: Rect, depth: usize) -> f32 {
 /// rename ends when the field lets go of the keyboard.
 fn rename_field(app: &mut FigApp, ui: &mut Ui, id: NodeId, depth: usize, name: &str, r: Rect) -> Option<String> {
     let rr = r.shrink2(vec2(8.0, 0.0));
-    let rect = Rect::from_min_max(pos2(row_x0(rr, depth) + 32.0, r.min.y + 4.0), pos2(rr.max.x - 4.0, r.max.y - 4.0));
+    let rect = if app.ui.adaptive.enabled {
+        Rect::from_min_max(pos2(row_x0(rr, depth) + 68.0, r.top()), pos2(rr.right() - 88.0, r.bottom()))
+    } else {
+        Rect::from_min_max(pos2(row_x0(rr, depth) + 32.0, r.min.y + 4.0), pos2(rr.max.x - 4.0, r.max.y - 4.0))
+    };
     let start = app.ui.rename.is_some_and(|x| x.start);
     let (out, open) = crate::widgets::rename_field(ui, rename_id(id), name, rect, regular(11.0), start);
     app.ui.rename = open.then_some(Rename { id, start: false });
@@ -564,7 +579,8 @@ fn set_expanded_deep(doc: &Document, id: NodeId, open: bool, expanded: &mut BTre
 
 /// The search row under the Layers header (live filter; Escape closes it).
 fn search_field(app: &mut FigApp, ui: &mut Ui, t: &Tokens, w: f32, id: Id) {
-    let (fr, _) = ui.allocate_exact_size(vec2(w, 32.0), Sense::hover());
+    let h = if app.ui.adaptive.enabled { 52.0 } else { 32.0 };
+    let (fr, _) = ui.allocate_exact_size(vec2(w, h), Sense::hover());
     let field = Rect::from_min_max(pos2(fr.min.x + 12.0, fr.min.y + 2.0), pos2(fr.max.x - 12.0, fr.max.y - 6.0));
     ui.painter().rect_filled(field, CornerRadius::same(5), t.field);
     icons::paint(ui.painter(), Rect::from_center_size(pos2(field.min.x + 12.0, field.center().y), vec2(12.0, 12.0)), Icon::Search, t.icon_secondary);
@@ -591,9 +607,11 @@ fn search_field(app: &mut FigApp, ui: &mut Ui, t: &Tokens, w: f32, id: Id) {
 fn layers(app: &mut FigApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let w = ui.available_width();
-    let (hr, _) = ui.allocate_exact_size(vec2(w, 40.0), Sense::hover());
+    let cell = crate::adaptive::target_size(ui, 24.0);
+    let (hr, _) = ui.allocate_exact_size(vec2(w, crate::adaptive::target_size(ui, 40.0)), Sense::hover());
     ui.painter().text(pos2(hr.min.x + 16.0, hr.center().y), Align2::LEFT_CENTER, tr("Layers"), semibold(11.0), t.text);
-    let sr = Rect::from_center_size(pos2(hr.max.x - 22.0, hr.center().y), vec2(24.0, 24.0));
+    let sx = if app.ui.adaptive.enabled { hr.max.x - cell / 2.0 } else { hr.max.x - 22.0 };
+    let sr = Rect::from_center_size(pos2(sx, hr.center().y), vec2(cell, cell));
     let sresp = ui.interact(sr, ui.id().with("layer_search_btn"), Sense::click()).tip(tr("Search layers"));
     if sresp.hovered() || app.ui.layer_search {
         ui.painter().rect_filled(sr, CornerRadius::same(5), t.hover);
@@ -672,12 +690,13 @@ fn layers(app: &mut FigApp, ui: &mut Ui) {
     let mut refused = false;
     // Only the rows in view are laid out and drawn; the rest is empty scroll space.
     egui::ScrollArea::vertical().auto_shrink([false, false]).show_viewport(ui, |ui, viewport| {
-        let pitch = ROW + ui.spacing().item_spacing.y;
+        let row_height = crate::adaptive::target_size(ui, ROW);
+        let pitch = row_height + ui.spacing().item_spacing.y;
         let top = ui.max_rect().top();
         let total = rows.len() as f32 * pitch;
         ui.set_height(total.max(viewport.height()));
         if let Some(i) = scroll_to {
-            ui.scroll_to_rect(Rect::from_min_size(pos2(ui.max_rect().left(), top + i as f32 * pitch), vec2(w, ROW)), None);
+            ui.scroll_to_rect(Rect::from_min_size(pos2(ui.max_rect().left(), top + i as f32 * pitch), vec2(w, row_height)), None);
         }
         if rows.is_empty() {
             ui.add_space(8.0);
@@ -714,7 +733,7 @@ fn layers(app: &mut FigApp, ui: &mut Ui) {
         let ui = &mut band_ui;
         for row in rows.iter().take(last).skip(first) {
             let Some(n) = doc.node(row.id) else { continue };
-            let (r, resp) = ui.allocate_exact_size(vec2(w, ROW), Sense::click_and_drag());
+            let (r, resp) = ui.allocate_exact_size(vec2(w, row_height), Sense::click_and_drag());
             let selected = sel.contains(&row.id);
             a11y::layer_row(&mut app.ui.nav, &resp);
             if sel.last() == Some(&row.id) {
@@ -753,11 +772,20 @@ fn layers(app: &mut FigApp, ui: &mut Ui) {
             let x0 = row_x0(rr, row.depth);
             // Expand triangle.
             if row.has_kids {
-                let tri = Rect::from_center_size(pos2(x0 + 6.0, r.center().y), vec2(14.0, 14.0));
+                let tri = if app.ui.adaptive.enabled {
+                    Rect::from_min_size(pos2(x0, r.top()), vec2(44.0, row_height))
+                } else {
+                    Rect::from_center_size(pos2(x0 + 6.0, r.center().y), vec2(14.0, 14.0))
+                };
                 let tresp = ui.interact(tri, ui.id().with(("tri", row.id)), Sense::click());
                 let open = app.ui.expanded.contains(&row.id);
                 a11y::button(&tresp, if open { tr("Collapse") } else { tr("Expand") });
-                icons::paint(ui.painter(), tri.shrink(1.0), if open { Icon::Chevron } else { Icon::ChevronRight }, t.icon_secondary);
+                icons::paint(
+                    ui.painter(),
+                    Rect::from_center_size(tri.center(), vec2(12.0, 12.0)),
+                    if open { Icon::Chevron } else { Icon::ChevronRight },
+                    t.icon_secondary,
+                );
                 if tresp.clicked() {
                     if ui.input(|i| i.modifiers.alt) {
                         deep = Some((row.id, !open));
@@ -775,8 +803,9 @@ fn layers(app: &mut FigApp, ui: &mut Ui) {
             } else {
                 t.text_tertiary
             };
-            icons::paint(ui.painter(), Rect::from_center_size(pos2(x0 + 22.0, r.center().y), vec2(14.0, 14.0)), icon, icon_col);
-            let name_x = x0 + 36.0;
+            let inset = if app.ui.adaptive.enabled { 36.0 } else { 0.0 };
+            icons::paint(ui.painter(), Rect::from_center_size(pos2(x0 + 22.0 + inset, r.center().y), vec2(14.0, 14.0)), icon, icon_col);
+            let name_x = x0 + 36.0 + inset;
             if app.ui.rename.is_some_and(|rn| rn.id == row.id) {
                 if let Some(new) = rename_field(app, ui, row.id, row.depth, &n.name, r) {
                     rename_done = Some((row.id, new));
@@ -798,7 +827,7 @@ fn layers(app: &mut FigApp, ui: &mut Ui) {
                 };
                 let name = if n.name.is_empty() { tr(n.kind.label()).to_string() } else { n.name.clone() };
                 // Room left of the lock and eye buttons.
-                let max_w = (rr.max.x - 56.0 - name_x).max(20.0);
+                let max_w = (rr.max.x - if app.ui.adaptive.enabled { 88.0 } else { 56.0 } - name_x).max(20.0);
                 crate::bidi::paint_name(ui.painter(), pos2(name_x, r.center().y), &name, font, col, max_w);
             }
             // A sweep across the eyes or padlocks takes in the rows the pointer passes.
@@ -812,10 +841,19 @@ fn layers(app: &mut FigApp, ui: &mut Ui) {
             // Lock / eye on hover (or when set); a layer in a locked one shows a faint padlock.
             let hidden = swept(false).unwrap_or(!n.visible);
             let locked = swept(true).unwrap_or(n.locked);
-            let show_lock = over || locked || row.locked_above;
-            let show_eye = over || hidden;
-            let er = Rect::from_center_size(pos2(rr.max.x - 14.0, r.center().y), vec2(20.0, 20.0));
-            let lr = Rect::from_center_size(pos2(rr.max.x - 36.0, r.center().y), vec2(20.0, 20.0));
+            let show_lock = app.ui.adaptive.enabled || over || locked || row.locked_above;
+            let show_eye = app.ui.adaptive.enabled || over || hidden;
+            let (er, lr) = if app.ui.adaptive.enabled {
+                (
+                    Rect::from_center_size(pos2(rr.max.x - 22.0, r.center().y), vec2(44.0, row_height)),
+                    Rect::from_center_size(pos2(rr.max.x - 66.0, r.center().y), vec2(44.0, row_height)),
+                )
+            } else {
+                (
+                    Rect::from_center_size(pos2(rr.max.x - 14.0, r.center().y), vec2(20.0, 20.0)),
+                    Rect::from_center_size(pos2(rr.max.x - 36.0, r.center().y), vec2(20.0, 20.0)),
+                )
+            };
             if show_eye {
                 let eresp = ui.interact(er, ui.id().with(("eye", row.id)), Sense::click_and_drag());
                 a11y::toggle(&eresp, tr("Hidden"), hidden);

@@ -12,7 +12,7 @@ use crate::icons::{self, Icon};
 use crate::list_drag::{ListDrag, move_flags};
 use crate::style_picker::{self, StyleSlot};
 use crate::theme::{ACCENT, Tokens, regular, semibold};
-use crate::widgets::{self, Edit, FIELD_H, FieldEdit, Lead, PAD};
+use crate::widgets::{self, Edit, FieldEdit, Lead, PAD, field_height};
 use crate::{FigApp, RightTab};
 
 /// Common value of `f` across `ids` (None when mixed or empty).
@@ -86,15 +86,20 @@ pub fn right_panel(app: &mut FigApp, ui: &mut Ui) {
     // As wide as its label needs (longer in some languages).
     let label = ui.painter().layout_no_wrap(tr("Share").to_string(), semibold(11.5), Color32::WHITE);
     let sw = (label.size().x + 24.0).max(56.0);
-    let share = Rect::from_min_size(pos2(top.max.x - 14.0 - sw, top.center().y - 16.0), vec2(sw, 32.0));
+    let sh = crate::adaptive::target_size(ui, 32.0);
+    let share = Rect::from_min_size(pos2(top.max.x - 14.0 - sw, top.center().y - sh / 2.0), vec2(sw, sh));
     let sresp = ui.interact(share, ui.id().with("share"), Sense::click()).tip(tr("Share: live session, export"));
     ui.painter().rect_filled(share, CornerRadius::same(6), if sresp.hovered() { t.accent_hover } else { ACCENT });
     ui.painter().galley(share.center() - label.size() / 2.0, label, Color32::WHITE);
     crate::live::share_popover(app, &sresp);
     // Play presents; its chevron opens the play menu (present, or preview in a pane).
     let play = Rect::from_min_size(pos2(share.min.x - 50.0, top.center().y - 14.0), vec2(42.0, 28.0));
-    let (tri_r, chev_r) =
+    let (mut tri_r, mut chev_r) =
         (Rect::from_min_max(play.min, pos2(play.max.x - 16.0, play.max.y)), Rect::from_min_max(pos2(play.max.x - 16.0, play.min.y), play.max));
+    if crate::adaptive::touch(ui.ctx()) {
+        chev_r = Rect::from_min_size(pos2(share.left() - 48.0, top.center().y - 22.0), vec2(44.0, 44.0));
+        tri_r = chev_r.translate(vec2(-44.0, 0.0));
+    }
     let present_keys = crate::toolbar::pretty_shortcut(crate::shortcuts::shortcut("proto.present").unwrap_or(""));
     let presp = ui.interact(tri_r, ui.id().with("play"), Sense::click()).tip(format!("{}  {present_keys}", tr("Present")));
     let mresp = ui.interact(chev_r, ui.id().with("play_menu"), Sense::click()).tip(tr("Present or preview"));
@@ -121,12 +126,14 @@ pub fn right_panel(app: &mut FigApp, ui: &mut Ui) {
         }
     });
     // Tabs row.
-    let (tabs, _) = ui.allocate_exact_size(vec2(w, 40.0), Sense::hover());
+    let tab_h = crate::adaptive::target_size(ui, 40.0);
+    let (tabs, _) = ui.allocate_exact_size(vec2(w, tab_h), Sense::hover());
     ui.painter().line_segment([tabs.left_top(), tabs.right_top()], Stroke::new(1.0, t.border));
     let mut x = tabs.min.x + 8.0;
     for (tab, label) in [(RightTab::Design, tr("Design")), (RightTab::Prototype, tr("Prototype"))] {
         let galley = ui.painter().layout_no_wrap(label.into(), semibold(11.0), t.text);
-        let r = Rect::from_min_size(pos2(x, tabs.center().y - 12.0), vec2(galley.size().x + 16.0, 24.0));
+        let h = crate::adaptive::target_size(ui, 24.0);
+        let r = Rect::from_min_size(pos2(x, tabs.center().y - h / 2.0), vec2(galley.size().x + 16.0, h));
         let resp = ui.interact(r, ui.id().with(("rtab", label)), Sense::click());
         let active = app.ui.right_tab == tab;
         a11y::tab(&resp, label, active);
@@ -141,7 +148,8 @@ pub fn right_panel(app: &mut FigApp, ui: &mut Ui) {
     }
     // Zoom menu.
     let zoom = app.session.ds().map(|d| d.view.zoom).unwrap_or(1.0);
-    let zr = Rect::from_min_size(pos2(tabs.max.x - 64.0, tabs.center().y - 12.0), vec2(56.0, 24.0));
+    let zh = crate::adaptive::target_size(ui, 24.0);
+    let zr = Rect::from_min_size(pos2(tabs.max.x - 64.0, tabs.center().y - zh / 2.0), vec2(56.0, zh));
     let zresp = ui.interact(zr, ui.id().with("zoommenu"), Sense::click());
     // The value is only spelled out while a screen reader reads the tree.
     let value = if a11y::active(&zresp.ctx) { format!("{}%", (zoom * 100.0).round()) } else { String::new() };
@@ -275,7 +283,7 @@ pub fn menu_row(ui: &mut Ui, label: &str, shortcut: &str, art_w: f32, art: impl 
         (!shortcut.is_empty()).then(|| ui.painter().layout_no_wrap(crate::toolbar::pretty_shortcut(shortcut), regular(11.0), Color32::PLACEHOLDER));
     let trail = keys.as_ref().map_or(0.0, |k| k.size().x + MENU_PAD).max(art_w);
     let w = ui.available_width().max(menu_row_width(text.size().x, trail).ceil());
-    let (r, resp) = ui.allocate_exact_size(vec2(w, 26.0), Sense::click());
+    let (r, resp) = ui.allocate_exact_size(vec2(w, crate::adaptive::target_size(ui, 26.0)), Sense::click());
     a11y::menu_item(&resp, label, shortcut, None);
     // The keyboard's item is highlighted like the hovered one.
     a11y::own_focus(&resp);
@@ -315,7 +323,8 @@ pub(crate) fn row(ui: &mut Ui, h: f32, add: impl FnOnce(&mut Ui)) {
 
 /// [`row`], returning the area the row takes.
 pub(crate) fn row_rect(ui: &mut Ui, h: f32, add: impl FnOnce(&mut Ui)) -> Rect {
-    block(ui, h, (h - FIELD_H) / 2.0, add)
+    let h = if crate::adaptive::touch(ui.ctx()) { h.max(field_height(ui) + 8.0) } else { h };
+    block(ui, h, (h - field_height(ui)) / 2.0, add)
 }
 
 /// A panel row `h` tall whose content is inset `inset_y` from its top and bottom (for content
@@ -471,8 +480,10 @@ fn header(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
         }
     };
     let w = ui.available_width();
-    let (r, _) = ui.allocate_exact_size(vec2(w, 40.0), Sense::hover());
-    let lr = Rect::from_min_size(pos2(r.min.x + 8.0, r.center().y - 12.0), vec2(120.0, 24.0));
+    let cell = crate::adaptive::target_size(ui, 24.0);
+    let (r, _) = ui.allocate_exact_size(vec2(w, crate::adaptive::target_size(ui, 40.0)), Sense::hover());
+    let label_width = if crate::adaptive::touch(ui.ctx()) { (w - 3.0 * cell - if is_frame { cell } else { 0.0 } - 20.0).min(120.0) } else { 120.0 };
+    let lr = Rect::from_min_size(pos2(r.min.x + 8.0, r.center().y - cell / 2.0), vec2(label_width, cell));
     let resp = ui.interact(lr, ui.id().with("typedd"), Sense::click());
     if resp.hovered() {
         ui.painter().rect_filled(lr, CornerRadius::same(5), t.hover);
@@ -490,7 +501,7 @@ fn header(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
         menu_popup(&resp).width(180.0).show(|ui| kind_items(app, ui, false));
     }
     if is_frame {
-        let sr = Rect::from_min_size(pos2(lr.max.x + 4.0, r.center().y - 12.0), vec2(24.0, 24.0));
+        let sr = Rect::from_min_size(pos2(lr.max.x + 4.0, r.center().y - cell / 2.0), vec2(cell, cell));
         let sresp = ui.interact(sr, ui.id().with("swap_orient"), Sense::click()).tip(tr("Swap orientation"));
         if sresp.hovered() {
             ui.painter().rect_filled(sr, CornerRadius::same(5), t.hover);
@@ -528,7 +539,7 @@ fn header(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     // Layers in boolean groups, or one boolean group: the operation they use (checked in the menu).
     let current = figcraft_engine::booleans::shown_op(doc, sel);
     for (icon, label, cmd) in actions.into_iter().rev() {
-        let br = Rect::from_min_size(pos2(x - 24.0, r.center().y - 12.0), vec2(24.0, 24.0));
+        let br = Rect::from_min_size(pos2(x - cell, r.center().y - cell / 2.0), vec2(cell, cell));
         let tip = if cmd == "bool.union" { label } else { crate::shortcuts::tip(label, cmd) };
         let bresp = ui.interact(br, ui.id().with(("qa", cmd)), Sense::click()).tip(tip);
         if bresp.hovered() {
@@ -568,7 +579,7 @@ fn header(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
         } else if bresp.clicked() {
             app.run(cmd, json!({}));
         }
-        x -= 26.0;
+        x -= cell + 2.0;
     }
     crate::component_panel::instance_section(app, ui, doc, sel);
 }
@@ -987,7 +998,7 @@ fn variable_modes(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId])
             None => c.name.clone(),
         };
         row(ui, 32.0, |ui| {
-            let (rect, _) = ui.allocate_exact_size(vec2(name_w, FIELD_H), Sense::hover());
+            let (rect, _) = ui.allocate_exact_size(vec2(name_w, field_height(ui)), Sense::hover());
             let name = widgets::elide(ui, &c.name, name_w);
             ui.painter().text(pos2(rect.min.x, rect.center().y), Align2::LEFT_CENTER, &name, regular(11.0), t.text);
             if name != c.name || r.library.is_some() {
@@ -1042,8 +1053,8 @@ fn range_fill(app: &mut FigApp, ui: &mut Ui, doc: &Document, id: NodeId, start: 
         it.all(|f| f == first).then_some(first)
     });
     row(ui, 32.0, |ui| {
-        let w = ui.available_width() - 28.0;
-        let (r, _) = ui.allocate_exact_size(vec2(w, FIELD_H), Sense::hover());
+        let w = ui.available_width() - if crate::adaptive::touch(ui.ctx()) { 52.0 } else { 28.0 };
+        let (r, _) = ui.allocate_exact_size(vec2(w, field_height(ui)), Sense::hover());
         ui.painter().rect_filled(r, CornerRadius::same(5), t.field);
         let sw = Rect::from_min_size(pos2(r.min.x + 4.0, r.center().y - 8.0), vec2(16.0, 16.0));
         let text_r = Rect::from_min_max(pos2(sw.max.x + 8.0, r.min.y), pos2(r.max.x - 4.0, r.max.y));
@@ -1528,8 +1539,8 @@ fn paint_row(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], i: usize, p: &Paint,
     let ids = ids.to_vec();
     let cmd = if fills { "fill.set" } else { "stroke.set" };
     row_rect(ui, 32.0, |ui| {
-        let w = ui.available_width() - 56.0;
-        let (r, _) = ui.allocate_exact_size(vec2(w, FIELD_H), Sense::hover());
+        let w = ui.available_width() - if crate::adaptive::touch(ui.ctx()) { 104.0 } else { 56.0 };
+        let (r, _) = ui.allocate_exact_size(vec2(w, field_height(ui)), Sense::hover());
         ui.painter().rect_filled(r, CornerRadius::same(5), t.field);
         let sw = Rect::from_min_size(pos2(r.min.x + 4.0, r.center().y - 8.0), vec2(16.0, 16.0));
         widgets::paint_swatch(ui.painter(), sw, p);
@@ -1637,7 +1648,7 @@ fn effects(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
                 open = !open;
                 ui.data_mut(|d| d.insert_temp(Id::new((FX_OPEN, i)), open));
             }
-            let w = ui.available_width() - 56.0;
+            let w = ui.available_width() - if crate::adaptive::touch(ui.ctx()) { 104.0 } else { 56.0 };
             let resp = widgets::dropdown(ui, tr(e.label()), w, None);
             menu_popup(&resp).show(|ui| {
                 for (l, ty) in Effect::TYPES {
@@ -1936,7 +1947,7 @@ fn grids(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
                 open = !open;
                 ui.data_mut(|d| d.insert_temp(open_id, open));
             }
-            let w = ui.available_width() - 56.0;
+            let w = ui.available_width() - if crate::adaptive::touch(ui.ctx()) { 104.0 } else { 56.0 };
             let resp = widgets::dropdown(ui, &grid_label(g), w, None);
             menu_popup(&resp).width(220.0).show(|ui| {
                 for (l, kind) in [(tr("Grid"), GridKind::Grid), (tr("Columns"), GridKind::Columns), (tr("Rows"), GridKind::Rows)] {

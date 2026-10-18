@@ -1087,7 +1087,8 @@ fn draw(p: &P, icon: Icon) {
 /// Allocate a square icon button; returns the response. `active` paints the selected look.
 pub fn button(ui: &mut egui::Ui, icon: Icon, size: f32, active: bool, tooltip: &str) -> egui::Response {
     let t = crate::theme::Tokens::get(ui.ctx());
-    let (rect, resp) = ui.allocate_exact_size(vec2(size, size), egui::Sense::click());
+    let target = crate::adaptive::target_size(ui, size);
+    let (rect, resp) = ui.allocate_exact_size(vec2(target, target), egui::Sense::click());
     let bg = if active {
         t.selected_row
     } else if resp.is_pointer_button_down_on() {

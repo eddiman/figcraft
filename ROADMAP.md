@@ -1,5 +1,17 @@
 # FigCraft Roadmap
 
+Local iPad presentation checkpoint, 2026-10-18: T19 adds opt-in responsive
+shared panels, modal drawers, allocated touch controls and finger-only
+multi-select/constrain toggles. Layers and Assets retain existing command
+routes; desktop/browser presentation remains unchanged. A safe typed UIKit
+keyboard-layout-guide query supplies geometry without new unsafe code.
+Shared UI tests pass 595/0/1 and both iOS target checks pass. Rendered
+600/800/1200-point layouts and supplied keyboard bounds were inspected.
+Full CI passes 2,576/0/9, including web and plugin WASM builds.
+Native keyboard/rotation attempts did not pass, so runtime keyboard avoidance,
+rotation and the physical touch-only walkthrough remain unqualified.
+T19 remains in review; T23 qualification was not repeated.
+
 iPad automation checkpoint, 2026-10-18: T23 is complete. Hosted unsigned
 device/simulator jobs, Linux/workspace CI, web compilation and packaging lint
 pass on `c1eff4e` in `eddiman/figcraft`. The isolated XCTest covers field input,

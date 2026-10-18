@@ -8,6 +8,15 @@ name = "Español"
 status = "draft — needs native review"
 
 [ui]
+"Close panel" = "Cerrar panel"
+"Constrain" = "Restringir"
+"Context menu" = "Menú contextual"
+"Files" = "Archivos"
+"Multi-select" = "Selección múltiple"
+"Merge" = "Combinar"
+"Redo" = "Rehacer"
+"Undo" = "Deshacer"
+"Unsaved changes: save before closing this tab." = "Cambios sin guardar: guarda antes de cerrar esta pestaña."
 
 "% of all commits" = "% del total de commits"
 "(no longer published)" = "(ya no publicado)"

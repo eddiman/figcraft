@@ -113,7 +113,8 @@ impl Target {
     }
 }
 fn blocked_ui(app: &FigApp) -> bool {
-    app.ui.home
+    app.ui.adaptive.drawer.is_some()
+        || app.ui.home
         || app.ui.present.is_some()
         || app.ui.palette.is_some()
         || app.ui.about

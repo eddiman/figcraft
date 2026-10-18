@@ -14,6 +14,10 @@ use crate::{FigApp, TitleBar};
 pub const HEIGHT: f32 = 40.0;
 
 pub fn tab_bar(app: &mut FigApp, ui: &mut Ui) {
+    if app.ui.adaptive.enabled {
+        touch_tab_bar(app, ui);
+        return;
+    }
     let t = Tokens::get(ui.ctx());
     egui::Panel::top("tab_bar").exact_size(HEIGHT).frame(egui::Frame::NONE.fill(t.tab_bar)).show(ui, |ui| {
         let rect = ui.max_rect();
@@ -185,6 +189,67 @@ pub fn tab_bar(app: &mut FigApp, ui: &mut Ui) {
         }
         let _ = Color32::TRANSPARENT;
         let _ = Align2::LEFT_TOP;
+    });
+}
+
+fn touch_tab_bar(app: &mut FigApp, ui: &mut Ui) {
+    let t = Tokens::get(ui.ctx());
+    egui::Panel::top("touch_tabs").exact_size(44.0).frame(egui::Frame::NONE.fill(t.tab_bar)).show(ui, |ui| {
+        ui.horizontal(|ui| {
+            if crate::adaptive::button(app, ui, "home", tr("Home"), app.ui.home) {
+                app.cancel_canvas_pointer();
+                app.ui.home = true;
+            }
+            let name = app
+                .session
+                .ds()
+                .map(|ds| {
+                    let suffix = if app.owned_save_pending(ds.uid) {
+                        tr("Saving...")
+                    } else if app.session.file_is_dirty(ds.uid) {
+                        "*"
+                    } else {
+                        ""
+                    };
+                    crate::widgets::elide(ui, &format!("{} {suffix}", ds.doc.name), 120.0)
+                })
+                .unwrap_or_else(|_| tr("Files").to_string());
+            ui.menu_button(name, |ui| {
+                let docs: Vec<_> =
+                    app.session.docs.iter().enumerate().filter(|(_, d)| app.shows(d.uid)).map(|(i, d)| (i, d.doc.name.clone())).collect();
+                egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                    for (index, name) in docs {
+                        if ui.add_sized([ui.available_width().max(160.0), 44.0], egui::Button::new(name)).clicked() {
+                            app.run("doc.switch", json!({"index": index}));
+                            app.ui.home = false;
+                            ui.close();
+                        }
+                    }
+                });
+            });
+            if crate::adaptive::button(app, ui, "new", tr("New design file"), false) {
+                app.run("file.new", json!({}));
+                app.ui.home = false;
+            }
+            if crate::adaptive::button(app, ui, "close_tab", tr("Close tab"), false) {
+                let dirty = app.session.ds().is_ok_and(|d| d.branch_of.is_none() && app.session.file_is_dirty(d.uid));
+                if dirty {
+                    app.toast(tr("Unsaved changes: save before closing this tab."));
+                } else {
+                    app.run("file.close", json!({"index": app.session.active}));
+                }
+            }
+            ui.menu_button(tr("More"), |ui| {
+                if ui.add_sized([180.0, 44.0], egui::Button::new(tr("Close without saving"))).clicked() {
+                    app.run("file.close", json!({"index": app.session.active, "force": true}));
+                    ui.close();
+                }
+                if ui.add_sized([180.0, 44.0], egui::Button::new(tr("Save as"))).clicked() {
+                    app.run("file.saveAs", json!({}));
+                    ui.close();
+                }
+            });
+        });
     });
 }
 
