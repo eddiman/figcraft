@@ -156,7 +156,7 @@ impl<O: Ord + Copy> WriteTicket<O> {
         validate_parent(&self.key.parent)?;
         validate_target(&target)?;
         let id = STAGING
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
             .map_err(|_| io::Error::other("save staging IDs exhausted"))?;
         let staging = self.key.parent.join(format!(".figcraft-save.{}.{id}.tmp", std::process::id()));
         write_staging(&staging, bytes)?;

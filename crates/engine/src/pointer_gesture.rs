@@ -138,7 +138,7 @@ fn disabled(why: &str) -> EngineError {
     EngineError::Disabled("pointer.gesture".into(), why.into())
 }
 fn generation(counter: &AtomicU64) -> Result<u64> {
-    counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1)).map_err(|_| disabled("pointer gesture generations exhausted"))
+    counter.try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1)).map_err(|_| disabled("pointer gesture generations exhausted"))
 }
 
 impl Session {

@@ -1,5 +1,15 @@
 # Local iPad port development log
 
+## 2026-10-18: T23 current-stable atomic API compatibility
+
+The first hosted Linux Clippy job on Rust 1.99.1 rejected the downstream atomic allocators'
+deprecated `fetch_update` spelling. The eight iPad-related call sites now use
+`try_update`, with identical ordering, checked increments and error handling.
+The replacement is stable since Rust 1.95, matching the workspace minimum, and
+compiles on the pinned 1.98.1 toolchain. No warning suppression, dependency or
+toolchain change is introduced. Local full CI passes 2,568/0/9; both iOS target
+checks and the isolated bridge checks pass. Remote qualification remains in progress.
+
 ## 2026-10-18: T23 remote packaging repair
 
 Fork PR #1 targets `ipad/upstream-baseline` at the reviewed upstream SHA,

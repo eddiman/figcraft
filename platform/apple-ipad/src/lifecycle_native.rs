@@ -268,7 +268,7 @@ impl State {
 impl LifecycleHost {
     pub fn new(callback: Callback) -> Result<Self, String> {
         let mtm = MainThreadMarker::new().ok_or("lifecycle host requires the main thread")?;
-        let id = NEXT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1)).map_err(|_| "lifecycle owner IDs exhausted")?;
+        let id = NEXT.try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1)).map_err(|_| "lifecycle owner IDs exhausted")?;
         let state = Rc::new(State {
             id,
             mtm,

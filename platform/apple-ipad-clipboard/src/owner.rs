@@ -41,7 +41,7 @@ impl NamedHost {
         Ok(Self { state: Arc::new(State { name: native::GENERAL_HOST.into(), live: AtomicBool::new(true) }), _main_only: PhantomData })
     }
     pub fn new() -> Result<Self, Error> {
-        let sequence = NEXT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1)).map_err(|_| Error::Unavailable)?;
+        let sequence = NEXT.try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1)).map_err(|_| Error::Unavailable)?;
         let name = format!("org.figcraft.t13-writer-probe.{}.{}", std::process::id(), sequence);
         native::open_named(&name)?;
         Ok(Self { state: Arc::new(State { name, live: AtomicBool::new(true) }), _main_only: PhantomData })

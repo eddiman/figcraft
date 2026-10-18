@@ -171,7 +171,7 @@ pub(crate) struct PendingRequests {
 }
 
 fn allocate_id(counter: &AtomicU64) -> Result<RequestId, RejectReason> {
-    counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1)).map(RequestId).map_err(|_| RejectReason::IdExhausted)
+    counter.try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1)).map(RequestId).map_err(|_| RejectReason::IdExhausted)
 }
 
 impl FigApp {

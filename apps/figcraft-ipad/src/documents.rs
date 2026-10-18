@@ -15,7 +15,7 @@ fn unique_directory(parent: &Path, prefix: &str) -> io::Result<PathBuf> {
     }
     let time = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
     for _ in 0..32 {
-        let id = NEXT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1)).map_err(|_| io::Error::other("copy IDs exhausted"))?;
+        let id = NEXT.try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1)).map_err(|_| io::Error::other("copy IDs exhausted"))?;
         let path = parent.join(format!("{prefix}-{time}-{}-{id}", std::process::id()));
         match std::fs::create_dir(&path) {
             Ok(()) => return Ok(path),

@@ -263,7 +263,7 @@ pub fn prepare_save(session: &mut Session, document_uid: u64) -> Result<Prepared
     session.pointer_persistence_edit()?;
     let i = main_index(session, document_uid)?;
     let order = NEXT_SAVE
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
         .map(WriteOrder)
         .map_err(|_| EngineError::Other("save order exhausted".into()))?;
     let previous = session.ds().ok().map(|d| d.uid);
