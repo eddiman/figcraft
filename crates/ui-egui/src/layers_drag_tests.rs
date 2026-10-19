@@ -36,8 +36,13 @@ impl Ui {
 
     /// [`Self::frame_output`] with `modifiers` held.
     pub(crate) fn frame_with(&mut self, mut events: Vec<Event>, modifiers: egui::Modifiers) -> egui::FullOutput {
-        self.time += 1.0 / 60.0;
         events.insert(0, Event::ModifiersChanged(modifiers));
+        self.frame_raw(events)
+    }
+
+    /// A frame without an injected modifier event, including genuinely idle redraws.
+    pub(crate) fn frame_raw(&mut self, events: Vec<Event>) -> egui::FullOutput {
+        self.time += 1.0 / 60.0;
         let input = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, self.size)), time: Some(self.time), events, ..Default::default() };
         let app = &mut self.app;
         let mut out = self.ctx.run_ui(input, |ui| app.ui(ui));

@@ -81,6 +81,33 @@ fn a_new_file_takes_the_page_colour_of_the_theme_and_keeps_it() {
 }
 
 #[test]
+fn ipad_text_canvas_keeps_ime_output_during_idle_and_composition() {
+    for composing in [false, true] {
+        let mut u = Ui::new(Session::new());
+        u.app.run("tool.text", json!({})).unwrap();
+        let p = u.app.canvas.rect.center();
+        u.button(p, true);
+        u.button(p, false);
+        let id = u.app.session.ds().unwrap().text_edit.as_ref().expect("text tool starts editing").id;
+        let event = if composing {
+            Event::Ime(egui::ImeEvent::Preedit { text: "candidate".into(), active_range_chars: Some(3..3) })
+        } else {
+            Event::PointerMoved(p)
+        };
+        assert!(u.frame_output(vec![event]).platform_output.ime.is_some());
+        for frame in 0..8 {
+            let output = u.frame_raw(vec![]);
+            assert!(output.platform_output.ime.is_some(), "idle frame {frame}, composing={composing}");
+            assert_eq!(u.app.session.ds().unwrap().text_edit.as_ref().unwrap().id, id);
+            assert_eq!(text(&u, id), "", "presentation must not commit marked text");
+        }
+        press(&mut u, Key::Escape);
+        assert!(u.app.session.ds().unwrap().text_edit.is_none());
+        assert!(u.frame_output(vec![]).platform_output.ime.is_none());
+    }
+}
+
+#[test]
 fn ipad_text_unicode_replacement_paste_and_single_undo() {
     let mut session = Session::new();
     let id = NodeId(session.execute("text.create", &json!({"text": "Before", "x": 20, "y": 20})).unwrap()["id"].as_u64().unwrap());

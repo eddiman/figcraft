@@ -105,9 +105,6 @@ pub fn handle(app: &mut FigApp, ctx: &Context, typing: bool) {
         return;
     }
     let events: Vec<Event> = ctx.input(|i| i.events.clone());
-    if events.is_empty() {
-        return;
-    }
     if events.iter().any(|event| {
         matches!(event, Event::Text(_) | Event::Ime(_) | Event::Key { .. } | Event::Paste(_) | Event::OwnedPaste(_) | Event::Copy | Event::Cut)
     }) {
@@ -116,6 +113,9 @@ pub fn handle(app: &mut FigApp, ctx: &Context, typing: bool) {
     let editing = app.session.ds().map(|d| d.text_edit.is_some()).unwrap_or(false);
     if editing {
         text_keys(app, ctx, &events);
+        return;
+    }
+    if events.is_empty() {
         return;
     }
     // An image-only clipboard brings no paste event, just the key: paste from the key then.

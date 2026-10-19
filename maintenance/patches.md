@@ -6,9 +6,13 @@ The corresponding [version record](upstream.toml) is a snapshot, not a claim
 that a newer upstream revision was merged or qualified.
 
 Subsequent T20 diagnostics add shared Unicode/composition/field regressions.
-Native fields accept accent/emoji strings; native canvas keyboard focus still
-fails with and without validated fonts. See [D20](../docs/ipad/execution/decisions/D20-text-input.md).
-This does not retire IPAD-004 or decide that a native adapter is unnecessary.
+D20 revision 1 repairs canvas IME output disappearing on event-free redraws,
+which caused the existing platform integration to disable native input.
+Unchanged native text tests and pinned-font idle/field-transfer diagnostics
+now pass with exact recovered strings. See [D20](../docs/ipad/execution/decisions/D20-text-input.md).
+Preserve this per-frame output lifetime when merging shortcuts.rs. Physical
+composition/range/keyboard gates remain open; this neither retires IPAD-004
+nor decides that a native adapter is unnecessary.
 
 T22 extends IPAD-002 with shared touch-tool minimum targets, focus names and
 scrolling, modal/save-prompt keyboard restoration and the existing owned-copy

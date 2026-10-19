@@ -1,5 +1,14 @@
 # FigCraft Roadmap
 
+Local iPad canvas-focus repair, 2026-10-19: T20 traced disappearing native
+input to missing shared IME output on event-free redraws. The shared handler
+now preserves active canvas text presentation before returning for empty
+events. Five text regressions, full CI (2,591/0/10), both iOS checks and native
+canvas/field/idle-transfer diagnostics pass; recovery contains the exact
+typed strings. D20 revision 1 records the bounded review. Physical composition,
+native range/undo semantics and keyboard variants remain unqualified; T20
+stays blocked and T32 undecided. No native adapter or dependency changed.
+
 Local iPad retained-UI audit, 2026-10-19: T22 repairs 44-point touch-tool
 targets, focus names/scrolling, drawer/save-prompt keyboard restoration and
 the touch Save route. Six shared regressions and an isolated native rectangle/

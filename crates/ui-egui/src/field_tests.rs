@@ -205,6 +205,28 @@ fn click(u: &mut Ui, p: Pos2) {
 }
 
 #[test]
+fn ipad_text_field_to_canvas_transfers_idle_ime_output() {
+    let (mut u, _, _) = setup();
+    let (p, _) = field(&mut u, "Width");
+    click(&mut u, p);
+    assert!(crate::a11y::field_focused(&u.ctx));
+    let field_ime = u.frame_raw(vec![]).platform_output.ime.expect("field keeps native input while idle");
+    assert_ne!(field_ime.rect, u.app.canvas.rect);
+    u.app.run("tool.text", json!({})).unwrap();
+    let p = u.app.canvas.rect.center();
+    click(&mut u, p);
+    assert!(!crate::a11y::field_focused(&u.ctx));
+    let id = u.app.session.ds().unwrap().text_edit.as_ref().unwrap().id;
+    for _ in 0..4 {
+        let ime = u.frame_raw(vec![]).platform_output.ime.expect("canvas keeps native input after field transfer");
+        assert_eq!(ime.rect, u.app.canvas.rect);
+    }
+    u.frame(vec![Event::Text("canvas".into())]);
+    let figcraft_doc::NodeKind::Text(text) = &u.app.session.doc().unwrap().node(id).unwrap().kind else { panic!("text node") };
+    assert_eq!(text.characters, "canvas");
+}
+
+#[test]
 fn ipad_text_numeric_field_owns_composition_and_undo() {
     let (mut u, a, _) = setup();
     let nodes = u.app.session.doc().unwrap().nodes().count();

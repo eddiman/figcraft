@@ -1,5 +1,31 @@
 # Local iPad port development log
 
+## 2026-10-19: T20 canvas IME output survives idle frames
+
+A fresh canvas edit lost IME output on the first redraw with no input events.
+The usual shared test harness inserted ModifiersChanged into "empty" frames,
+so earlier tests did not exercise that case. egui-winit disables IME without
+output, and the existing iOS winit implementation then resigns first responder.
+D20 revision 1 reviews moving the empty-event guard after active text handling,
+without changing field ownership, text semantics or native interfaces.
+
+Two new regressions use event-free frames with the existing harness clock:
+fresh/marked canvas edits and numeric-field-to-canvas focus. All five text
+checks pass; full CI passes 2,591/0/10 and both iOS checks pass. Initial
+test-harness texture/clock issues and an interrupted CI attempt are retained
+separately from final success. Task-created compiler intermediates were
+removed to restore the disk margin; final CI used two build jobs.
+
+The three unchanged native tests now pass, including canvas entry without
+optional fonts. Current recovery contains exactly T20 canvas. A pinned-font
+workflow verifies four-second idle periods and field/canvas transfers,
+with exact accent/emoji and second-string storage in two new nodes.
+The visible emoji remains a missing glyph. Earlier Move-tool test setup and
+offscreen tap-position attempts remain recorded. This is not physical IME
+composition, native range mapping, native undo or keyboard-variant acceptance.
+No native adapter was introduced. T20 remains blocked; T32 remains undecided.
+T23 qualification was not repeated.
+
 ## 2026-10-19: T22 retained labels, focus, sizing and Save route
 
 Initial headless checks exposed a 37-point Text target, unnamed touch-toolbar
