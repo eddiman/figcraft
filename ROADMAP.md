@@ -1,5 +1,12 @@
 # FigCraft Roadmap
 
+Local iPad retained-UI audit, 2026-10-19: T22 repairs 44-point touch-tool
+targets, focus names/scrolling, drawer/save-prompt keyboard restoration and
+the touch Save route. Six shared regressions and an isolated native rectangle/
+inspector/drawer/invalid-name/corrected-save workflow pass. T22 stays review;
+physical workflows and T20/T32 remain unpassed. Excluded accessibility features
+are unchanged.
+
 Local iPad text diagnostics, 2026-10-19: T20 adds Unicode, marked-text,
 replacement, paste/undo and numeric-field ownership regressions. Native
 simulator fields accept accent/emoji strings, but canvas typing lacks native

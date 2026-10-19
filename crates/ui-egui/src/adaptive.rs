@@ -59,6 +59,10 @@ pub fn target_size(ui: &egui::Ui, pointer: f32) -> f32 {
 
 pub(crate) fn button(app: &mut crate::FigApp, ui: &mut egui::Ui, key: &'static str, label: &str, selected: bool) -> bool {
     let response = ui.add(egui::Button::new(label).selected(selected).min_size(vec2(44.0, 44.0)));
+    crate::a11y::button(&response, label);
+    if response.has_focus() {
+        response.scroll_to_me(None);
+    }
     app.ui.adaptive.actions.push((key, response.rect.intersect(ui.clip_rect())));
     response.clicked()
 }
@@ -139,7 +143,7 @@ pub(crate) fn show(app: &mut crate::FigApp, ui: &mut egui::Ui, hidden: bool) {
                         [("save", tr("Save"), "file.save"), ("undo", tr("Undo"), "edit.undo"), ("redo", tr("Redo"), "edit.redo")]
                     {
                         if button(app, ui, key, label, false) {
-                            app.run(command, json!({}));
+                            crate::menus::invoke(app, command);
                         }
                     }
                     for (key, label, command) in [("layers", tr("Layers"), "view.layers"), ("assets", tr("Assets"), "view.assets")] {

@@ -92,16 +92,22 @@ fn touch_tools(app: &mut FigApp, ui: &mut Ui) {
             if tools.is_empty() {
                 continue;
             }
-            let response = ui
-                .menu_button(tr(group.name), |ui| {
+            let (response, menu) =
+                egui::containers::menu::MenuButton::from_button(egui::Button::new(tr(group.name)).min_size(vec2(44.0, 44.0))).ui(ui, |ui| {
                     for (tool, _) in &tools {
                         if ui.add_sized([ui.available_width().max(44.0), 44.0], egui::Button::new(tr(tool.label()))).clicked() {
                             app.run("tool.set", json!({"tool": tool.id()}));
                             ui.close();
                         }
                     }
-                })
-                .response;
+                });
+            a11y::menu_button(&response, tr(group.name), menu.is_some());
+            if group.tools.iter().any(|(tool, _)| *tool == app.session.tool.tool) {
+                a11y::prefer(&mut app.ui.nav, Region::Toolbar, response.id);
+            }
+            if response.has_focus() {
+                response.scroll_to_me(None);
+            }
             app.ui.adaptive.actions.push((group.key, response.rect.intersect(ui.clip_rect())));
         }
         if app.session.tool.tool == ToolId::ShapeBuilder {

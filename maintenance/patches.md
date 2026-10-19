@@ -10,6 +10,14 @@ Native fields accept accent/emoji strings; native canvas keyboard focus still
 fails with and without validated fonts. See [D20](../docs/ipad/execution/decisions/D20-text-input.md).
 This does not retire IPAD-004 or decide that a native adapter is unnecessary.
 
+T22 extends IPAD-002 with shared touch-tool minimum targets, focus names and
+scrolling, modal/save-prompt keyboard restoration and the existing owned-copy
+Save command dispatcher. IPAD-001 save acknowledgement remains unchanged.
+Six retained-UI regressions and the isolated native create/property/drawer/
+invalid-name/corrected-save workflow cover these changes. See the
+[retained audit](../docs/ipad/accessibility/README.md); physical acceptance
+and T20/T32 gates remain open.
+
 No upstream proposal is recorded for these changes. The fork's existing PR is
 not an upstream acceptance. Do not resolve conflicts with blanket ours/theirs,
 reset upstream ancestry, or remove patches solely because a merge is clean.

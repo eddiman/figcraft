@@ -1,5 +1,25 @@
 # Local iPad port development log
 
+## 2026-10-19: T22 retained labels, focus, sizing and Save route
+
+Initial headless checks exposed a 37-point Text target, unnamed touch-toolbar
+focus and lost modal Tab ownership. Shared repairs allocate 44-point tool
+groups, retain focus names/active-tool preference, scroll focused controls,
+keep modal Tab with egui and preserve layer-arrow commands/restoration.
+The owned-save prompt has named touch controls and restores keyboard origin.
+No snapshot/acknowledgement or native interface changed.
+
+Native testing additionally exposed touch Save bypassing the owned-copy UI
+route; the button now uses the existing menu dispatcher. The final isolated
+native workflow passes: create/select rectangle, keyboard-edit Height to 88,
+open/close Layers, reject a slash-containing name and recover to Saved after
+correction. Earlier OCR, orientation, routing and newline-submission failures
+remain recorded. One GUI restart retained original launch arguments/settings.
+Six shared regressions include real iPad-capability Save click, error recovery,
+rotation/pointer closure, layer arrows and 150-percent toolbar font traversal.
+T22 stays review; T20 native canvas focus and physical workflows remain open.
+VoiceOver, contrast-specific and reduced-motion scope remains excluded.
+
 ## 2026-10-19: T20 separate field and canvas diagnostics
 
 Three shared tests cover Unicode/emoji selection replacement, combining/CJK

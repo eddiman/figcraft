@@ -175,6 +175,10 @@ fn allocate_id(counter: &AtomicU64) -> Result<RequestId, RejectReason> {
 }
 
 impl FigApp {
+    pub(crate) fn owned_save_prompt_open(&self) -> bool {
+        self.platform_requests.save_prompt.is_some()
+    }
+
     pub(crate) fn begin_owned_save(&mut self, save_as: bool) {
         if self.platform_requests.save_prompt.is_some() {
             self.platform_error("A Save As dialog is already open");
@@ -198,6 +202,8 @@ impl FigApp {
             self.submit_owned_save(prepared, OwnedSaveDestination::Existing(path));
         } else {
             let name = source.map(|tab| tab.document_itself().name.clone()).unwrap_or_else(|| "Untitled".into());
+            let ctx = self.platform_context.clone();
+            crate::a11y::sheet_opened(self, &ctx);
             self.platform_requests.save_prompt = Some(OwnedSavePrompt { prepared, name, focus: true });
             self.platform_context.request_repaint();
         }
@@ -271,17 +277,23 @@ impl FigApp {
         let mut open = true;
         let mut save = false;
         let mut cancel = false;
+        let target = if self.ui.adaptive.enabled { egui::vec2(44.0, 44.0) } else { egui::Vec2::ZERO };
         crate::dialogs::window(crate::i18n::tr("Save as"), ctx).id(egui::Id::new("owned-save-as")).open(&mut open).show(ctx, |ui| {
             ui.label(crate::i18n::tr("Save a local copy in this app. The imported original is unchanged."));
-            let field = ui.text_edit_singleline(&mut prompt.name);
+            let field = ui.add(egui::TextEdit::singleline(&mut prompt.name).min_size(target));
+            crate::a11y::text(&field, crate::i18n::tr("Name"), &prompt.name);
             if prompt.focus {
                 field.request_focus();
                 prompt.focus = false;
             }
             save = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
             ui.horizontal(|ui| {
-                save |= ui.button(crate::i18n::tr("Save")).clicked();
-                cancel = ui.button(crate::i18n::tr("Cancel")).clicked();
+                let button = ui.add(egui::Button::new(crate::i18n::tr("Save")).min_size(target));
+                crate::a11y::button(&button, crate::i18n::tr("Save"));
+                save |= button.clicked();
+                let button = ui.add(egui::Button::new(crate::i18n::tr("Cancel")).min_size(target));
+                crate::a11y::button(&button, crate::i18n::tr("Cancel"));
+                cancel = button.clicked();
             });
         });
         cancel |= ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));

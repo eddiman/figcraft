@@ -61,6 +61,223 @@ fn find<'a>(nodes: &'a [Node], role: Role, label: &str) -> &'a Node {
     nodes.iter().find(|n| n.role() == role && n.label() == Some(label)).unwrap_or_else(|| panic!("no {role:?} named {label:?}"))
 }
 
+fn ipad_setup(width: f32) -> Ui {
+    let (mut u, ..) = setup();
+    u.size = egui::vec2(width, 900.0);
+    u.app.ui.adaptive.enabled = true;
+    u.app.ui.home = false;
+    u.ctx.enable_accesskit();
+    for _ in 0..4 {
+        u.frame(vec![]);
+    }
+    u
+}
+
+#[test]
+fn ipad_touch_toolbar_has_labels() {
+    for width in [600.0, 800.0, 1200.0] {
+        let mut u = ipad_setup(width);
+        let nodes = tree(&mut u);
+        for label in [
+            "Save",
+            "Undo",
+            "Redo",
+            "Layers",
+            "Assets",
+            "Properties",
+            "Actions",
+            "Move tools",
+            "Frame tools",
+            "Shape tools",
+            "Drawing tools",
+            "Text",
+            "Comment",
+            "Multi-select",
+            "Constrain",
+            "Duplicate",
+            "Context menu",
+        ] {
+            let node = find(&nodes, Role::Button, label);
+            let bounds = node.bounds().unwrap();
+            assert!(bounds.x1 - bounds.x0 >= 44.0 && bounds.y1 - bounds.y0 >= 44.0, "{width}/{label}: {bounds:?}");
+        }
+        for (_, rect) in &u.app.ui.adaptive.actions {
+            assert!(rect.width() >= 44.0 && rect.height() >= 44.0);
+        }
+        u.app.ui.nav.go(Region::Toolbar);
+        u.frame(vec![]);
+        u.frame(vec![]);
+        assert_eq!(name(&u), "Move tools", "the focused touch group must also have a shared focus name");
+    }
+}
+
+#[test]
+fn ipad_sheet_restores_keyboard_focus() {
+    for command in ["view.layers", "view.assets"] {
+        let mut u = ipad_setup(600.0);
+        u.app.ui.nav.go(Region::Toolbar);
+        u.frame(vec![]);
+        u.frame(vec![]);
+        let opener = u.ctx.memory(|m| m.focused()).expect("toolbar focus");
+        u.app.run(command, json!({}));
+        for _ in 0..3 {
+            u.frame(vec![]);
+        }
+        assert!(u.app.ui.adaptive.drawer.is_some());
+        press(&mut u, Key::Tab, Modifiers::NONE);
+        u.frame(vec![]);
+        let focused = u.ctx.memory(|m| m.focused()).expect("sheet owns Tab");
+        let rect = u.ctx.read_response(focused).expect("focused sheet control").rect;
+        let close = u.app.ui.adaptive.actions.iter().find(|(key, _)| *key == "close_drawer").unwrap().1;
+        assert!(close.contains(rect.center()), "Tab enters the sheet, not the disabled background");
+        press(&mut u, Key::Escape, Modifiers::NONE);
+        for _ in 0..4 {
+            u.frame(vec![]);
+        }
+        assert!(u.app.ui.adaptive.drawer.is_none());
+        assert_eq!(u.ctx.memory(|m| m.focused()), Some(opener), "closing the sheet returns to its keyboard origin");
+        assert_eq!(region(&u), Region::Toolbar);
+    }
+}
+
+#[test]
+fn ipad_sheet_layer_arrows_still_select_rows() {
+    let mut u = ipad_setup(600.0);
+    u.app.ui.nav.go(Region::Toolbar);
+    u.frame(vec![]);
+    u.app.run("view.layers", json!({}));
+    for _ in 0..3 {
+        u.frame(vec![]);
+    }
+    for _ in 0..60 {
+        press(&mut u, Key::Tab, Modifiers::NONE);
+        u.frame(vec![]);
+        if name(&u) == "Rect A" {
+            break;
+        }
+    }
+    assert_eq!(name(&u), "Rect A", "Tab reaches the selected row inside the sheet");
+    press(&mut u, Key::ArrowUp, Modifiers::NONE);
+    for _ in 0..3 {
+        u.frame(vec![]);
+    }
+    assert_eq!(name(&u), "Rect B");
+    assert_eq!(u.app.session.doc().unwrap().node(u.app.session.selection()[0]).unwrap().name, "Rect B");
+}
+
+#[test]
+fn ipad_sheet_rotation_and_pointer_close_do_not_restore_stale_focus() {
+    for pointer in [false, true] {
+        let mut u = ipad_setup(600.0);
+        u.app.ui.nav.go(Region::Toolbar);
+        u.frame(vec![]);
+        let opener = u.ctx.memory(|m| m.focused()).unwrap();
+        u.app.run("view.layers", json!({}));
+        for _ in 0..3 {
+            u.frame(vec![]);
+        }
+        if pointer {
+            let close = u.app.ui.adaptive.actions.iter().find(|(key, _)| *key == "close_drawer").unwrap().1.center();
+            u.button(close, true);
+            u.button(close, false);
+        } else {
+            u.size.x = 1200.0;
+        }
+        for _ in 0..6 {
+            u.frame(vec![]);
+        }
+        assert!(u.app.ui.adaptive.drawer.is_none());
+        if pointer {
+            assert!(!u.app.ui.nav.keyboard, "a pointer close must not resurrect keyboard mode");
+            assert_ne!(u.ctx.memory(|m| m.focused()), Some(opener));
+        } else {
+            assert_eq!(u.ctx.memory(|m| m.focused()), Some(opener), "rotation restores a still-visible keyboard origin");
+        }
+    }
+}
+
+#[test]
+fn ipad_save_prompt_has_named_touch_controls_and_recovers_from_error() {
+    struct FailingSave;
+    impl crate::Services for FailingSave {
+        fn capabilities(&self) -> crate::platform::PlatformCapabilities {
+            crate::platform::PlatformCapabilities::ipad()
+        }
+        fn supports_owned_saves(&self) -> bool {
+            true
+        }
+        fn submit_owned_save(&mut self, _: crate::platform_requests::OwnedSaveRequest) -> Result<(), String> {
+            Err("Synthetic save failure".into())
+        }
+    }
+    let mut u = ipad_setup(600.0);
+    u.app.services = Box::new(FailingSave);
+    let save = u.app.ui.adaptive.actions.iter().find(|(key, _)| *key == "save").unwrap().1.center();
+    u.button(save, true);
+    u.button(save, false);
+    assert!(u.app.owned_save_prompt_open(), "touch Save must use the owned-copy UI route");
+    press(&mut u, Key::Escape, Modifiers::NONE);
+    for _ in 0..4 {
+        u.frame(vec![]);
+    }
+    u.app.ui.nav.go(Region::Toolbar);
+    u.frame(vec![]);
+    let opener = u.ctx.memory(|m| m.focused()).unwrap();
+    crate::menus::invoke(&mut u.app, "file.save");
+    let nodes = tree(&mut u);
+    let bounds = find(&nodes, Role::TextInput, "Name").bounds().unwrap();
+    assert!(bounds.y1 - bounds.y0 >= 44.0);
+    let cancel = find(&nodes, Role::Button, "Cancel").bounds().unwrap();
+    assert!(cancel.x1 - cancel.x0 >= 44.0 && cancel.y1 - cancel.y0 >= 44.0);
+    press(&mut u, Key::Tab, Modifiers::NONE);
+    u.frame(vec![]);
+    let update = u.frame_output(vec![]).platform_output.accesskit_update.unwrap();
+    let focused = update.nodes.iter().find(|(id, _)| *id == update.focus).unwrap();
+    assert_eq!(focused.1.label(), Some("Save"));
+    press(&mut u, Key::Enter, Modifiers::NONE);
+    u.frame(vec![]);
+    assert!(u.app.owned_save_prompt_open(), "failure retains the editable prompt");
+    assert_eq!(u.app.ui.last_error.as_deref(), Some("Synthetic save failure"));
+    assert_eq!(u.app.ui.toast.as_ref().unwrap().0, "Synthetic save failure");
+    press(&mut u, Key::Escape, Modifiers::NONE);
+    for _ in 0..4 {
+        u.frame(vec![]);
+    }
+    assert!(!u.app.owned_save_prompt_open());
+    assert_eq!(u.ctx.memory(|m| m.focused()), Some(opener));
+}
+
+#[test]
+fn ipad_large_text_toolbar_keyboard_controls_remain_visible() {
+    let mut u = ipad_setup(600.0);
+    u.ctx.global_style_mut(|style| {
+        style.override_font_id = Some(egui::FontId::proportional(16.5));
+    });
+    for _ in 0..4 {
+        u.frame(vec![]);
+    }
+    u.app.ui.nav.go(Region::Toolbar);
+    u.frame(vec![]);
+    u.frame(vec![]);
+    let mut seen = std::collections::BTreeSet::new();
+    for _ in 0..24 {
+        assert_eq!(u.ctx.global_style().override_font_id.as_ref().unwrap().size, 16.5);
+        let label = name(&u);
+        assert!(!label.is_empty(), "focused enlarged toolbar control is named");
+        seen.insert(label);
+        let focused = u.ctx.memory(|m| m.focused()).expect("toolbar focus");
+        let rect = u.ctx.read_response(focused).unwrap().rect;
+        assert!(u.ctx.content_rect().contains_rect(rect), "focused enlarged control is scrolled into view: {rect:?}");
+        press(&mut u, Key::Tab, Modifiers::NONE);
+        for _ in 0..8 {
+            u.frame(vec![]);
+        }
+    }
+    for label in ["Move tools", "Text", "Comment", "Multi-select", "Constrain", "Duplicate", "Context menu"] {
+        assert!(seen.contains(label), "{label} is reachable at increased text size: {seen:?}");
+    }
+}
+
 #[test]
 fn the_screen_reader_tree_names_tools_layers_fields_tabs_and_the_canvas() {
     let (mut u, ..) = setup();
