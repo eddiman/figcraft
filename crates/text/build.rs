@@ -12,7 +12,14 @@ fn main() {
     let mut src = String::from("pub static CRAFT_FONTS: &[CraftFont] = &[\n");
     if let Some(dir) = std::env::var_os("CRAFT_FONTS_DIR").map(PathBuf::from) {
         let mut ok = false;
-        for manifest in ["fonts/latin-manifest.txt", "fonts/manifest.txt"] {
+        // D12 pins the primary manifest on iPad; its external revision has no
+        // Latin manifest. Other hosts retain their existing build inputs.
+        let manifests: &[&str] = if std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|os| os == "ios") {
+            &["fonts/manifest.txt"]
+        } else {
+            &["fonts/latin-manifest.txt", "fonts/manifest.txt"]
+        };
+        for manifest in manifests {
             match craft_fonts(&dir, manifest) {
                 Ok(entries) => {
                     ok = true;
@@ -27,6 +34,8 @@ fn main() {
         if !ok {
             println!("cargo::warning=building without craft-fonts (once it is there, `cargo clean -p figcraft-text` makes the next build use it)");
         }
+    } else if std::env::var_os("CRAFT_FONTS_REQUIRED").is_some() {
+        println!("cargo::error=CRAFT_FONTS_REQUIRED needs CRAFT_FONTS_DIR");
     }
     src.push_str("];\n");
     let out = PathBuf::from(std::env::var_os("OUT_DIR").unwrap_or_default()).join("craft_fonts.rs");

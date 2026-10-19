@@ -139,3 +139,42 @@ fn a_mismatched_image_buffer_is_dropped() {
         assert!(out.platform_output.commands.is_empty(), "{w}x{h}");
     }
 }
+
+#[test]
+fn ipad_copy_as_png_requires_acknowledgement() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    struct Native {
+        calls: Rc<Cell<usize>>,
+        result: Result<(), String>,
+    }
+    impl Services for Native {
+        fn clipboard_requires_confirmation(&self) -> bool {
+            true
+        }
+        fn clipboard_try_set_png(&mut self, width: u32, height: u32, rgba: &[u8]) -> Result<(), String> {
+            assert_eq!(rgba.len(), width as usize * height as usize * 4);
+            self.calls.set(self.calls.get() + 1);
+            self.result.clone()
+        }
+        fn clipboard_set_png(&mut self, _: u32, _: u32, _: &[u8]) {
+            panic!("a confirmed adapter must not use the legacy image writer");
+        }
+    }
+
+    for result in [Ok(()), Err("Clipboard write was denied".into()), Err("Clipboard is unavailable".into())] {
+        let mut page = Page::new();
+        let calls = Rc::new(Cell::new(0));
+        page.app.services = Box::new(Native { calls: calls.clone(), result: result.clone() });
+        let before = serde_json::to_value(page.app.session.doc().unwrap()).unwrap();
+        let selection = page.app.session.selection();
+        let output = page.frame_then(vec![], |app| crate::menus::invoke(app, "edit.copyAsPng"));
+        assert_eq!(calls.get(), 1);
+        assert!(output.is_empty(), "no duplicate legacy clipboard output");
+        assert_eq!(serde_json::to_value(page.app.session.doc().unwrap()).unwrap(), before);
+        assert_eq!(page.app.session.selection(), selection);
+        let expected = result.err().unwrap_or_else(|| "Copied as PNG".into());
+        assert_eq!(page.app.ui.toast.as_ref().map(|(message, _)| message.as_str()), Some(expected.as_str()));
+    }
+}

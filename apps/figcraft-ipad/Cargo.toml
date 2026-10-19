@@ -1,0 +1,38 @@
+[package]
+name = "figcraft-ipad"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "FigCraft iPad development app"
+
+[lints]
+workspace = true
+
+[dependencies]
+log = { workspace = true }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+figcraft-apple-ipad-clipboard = { path = "../../platform/apple-ipad-clipboard" }
+figcraft-apple-ipad = { path = "../../platform/apple-ipad" }
+figcraft-engine = { workspace = true }
+figcraft-recovery = { workspace = true }
+figcraft-text = { workspace = true }
+figcraft-ui-egui = { workspace = true }
+figcraft-doc = { workspace = true }
+figcraft-format = { workspace = true }
+figcraft-color = { workspace = true }
+egui = { workspace = true, features = ["figcraft-ipad-focus", "figcraft-ipad-clipboard"] }
+eframe = { workspace = true, features = ["default_fonts", "wgpu", "figcraft-ipad-focus", "figcraft-ipad-clipboard"] }
+image = { workspace = true }
+serde_json = { workspace = true }
+
+env_logger = { version = "0.11", default-features = false, features = ["auto-color", "humantime"] }
+
+[dev-dependencies]
+egui = { workspace = true, features = ["figcraft-ipad-focus", "figcraft-ipad-clipboard"] }
+figcraft-ui-egui = { workspace = true }
+figcraft-engine = { workspace = true }
+figcraft-recovery = { workspace = true }
+figcraft-apple-ipad = { path = "../../platform/apple-ipad" }
+serde_json = { workspace = true }

@@ -54,6 +54,92 @@ fn remembered(ui: &Ui, key: &str, default: ToolId) -> ToolId {
     ui.data(|d| d.get_temp::<u8>(egui::Id::new(("tb_last", key)))).and_then(|i| ToolId::ALL.get(i as usize).copied()).unwrap_or(default)
 }
 
+/// The same tool catalog and command routes, allocated in scrollable touch rows.
+pub(crate) fn touch_show(app: &mut FigApp, ui: &mut Ui, compact: bool) {
+    if compact {
+        egui::ScrollArea::horizontal().id_salt("compact_touch_tools").show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.menu_button(tr("Tools"), |ui| {
+                    egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| touch_tools(app, ui));
+                });
+                touch_modifiers(app, ui);
+            });
+        });
+        return;
+    }
+    egui::ScrollArea::horizontal().id_salt("touch_tools").show(ui, |ui| {
+        ui.horizontal(|ui| touch_tools(app, ui));
+    });
+    egui::ScrollArea::horizontal().id_salt("touch_modifiers").show(ui, |ui| {
+        ui.horizontal(|ui| touch_modifiers(app, ui));
+    });
+}
+
+fn touch_tools(app: &mut FigApp, ui: &mut Ui) {
+    if let Some(current) = app.session.ds().ok().and_then(|ds| ds.vector_edit.as_ref()).map(|v| v.tool) {
+        for tool in VTool::ALL {
+            if crate::adaptive::button(app, ui, tool.id(), tr(tool.label()), tool == current) {
+                app.run("vector.edit.tool", json!({"tool": tool.id()}));
+            }
+        }
+        if crate::adaptive::button(app, ui, "done", tr("Done editing"), false) {
+            app.run("vector.edit.end", json!({}));
+        }
+    } else {
+        let read_only = app.session.active_read_only().is_some();
+        for group in GROUPS {
+            let tools: Vec<_> = group.tools.iter().filter(|(tool, _)| !read_only || matches!(tool, ToolId::Move | ToolId::Hand)).collect();
+            if tools.is_empty() {
+                continue;
+            }
+            let (response, menu) =
+                egui::containers::menu::MenuButton::from_button(egui::Button::new(tr(group.name)).min_size(vec2(44.0, 44.0))).ui(ui, |ui| {
+                    for (tool, _) in &tools {
+                        if ui.add_sized([ui.available_width().max(44.0), 44.0], egui::Button::new(tr(tool.label()))).clicked() {
+                            app.run("tool.set", json!({"tool": tool.id()}));
+                            ui.close();
+                        }
+                    }
+                });
+            a11y::menu_button(&response, tr(group.name), menu.is_some());
+            if group.tools.iter().any(|(tool, _)| *tool == app.session.tool.tool) {
+                a11y::prefer(&mut app.ui.nav, Region::Toolbar, response.id);
+            }
+            if response.has_focus() {
+                response.scroll_to_me(None);
+            }
+            app.ui.adaptive.actions.push((group.key, response.rect.intersect(ui.clip_rect())));
+        }
+        if app.session.tool.tool == ToolId::ShapeBuilder {
+            for (mode, label) in [("merge", tr("Merge")), ("remove", tr("Remove"))] {
+                if crate::adaptive::button(app, ui, mode, label, app.session.tool.builder_remove == (mode == "remove")) {
+                    app.run("shapeBuilder.mode", json!({"mode": mode}));
+                }
+            }
+        }
+    }
+}
+
+fn touch_modifiers(app: &mut FigApp, ui: &mut Ui) {
+    for (key, label, selected) in
+        [("multi_select", tr("Multi-select"), app.ui.adaptive.multi_select), ("constrain", tr("Constrain"), app.ui.adaptive.constrain)]
+    {
+        if crate::adaptive::button(app, ui, key, label, selected) {
+            app.cancel_canvas_pointer();
+            if key == "multi_select" {
+                app.ui.adaptive.multi_select = !selected;
+            } else {
+                app.ui.adaptive.constrain = !selected;
+            }
+        }
+    }
+    for (key, label, command) in [("duplicate", tr("Duplicate"), "edit.duplicate"), ("context", tr("Context menu"), "view.contextMenu")] {
+        if crate::adaptive::button(app, ui, key, label, false) {
+            app.run(command, json!({}));
+        }
+    }
+}
+
 pub fn show(app: &mut FigApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let canvas = app.canvas.rect;

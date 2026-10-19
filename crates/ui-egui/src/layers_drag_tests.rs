@@ -12,12 +12,13 @@ use crate::{FigApp, NoServices};
 pub(crate) struct Ui {
     pub(crate) ctx: egui::Context,
     pub(crate) app: FigApp,
+    pub(crate) size: egui::Vec2,
     time: f64,
 }
 
 impl Ui {
     pub(crate) fn new(s: Session) -> Self {
-        let mut u = Self { ctx: egui::Context::default(), app: FigApp::new(s, Box::new(NoServices)), time: 0.0 };
+        let mut u = Self { ctx: egui::Context::default(), app: FigApp::new(s, Box::new(NoServices)), size: vec2(1440.0, 900.0), time: 0.0 };
         for _ in 0..3 {
             u.frame(vec![]);
         }
@@ -35,10 +36,14 @@ impl Ui {
 
     /// [`Self::frame_output`] with `modifiers` held.
     pub(crate) fn frame_with(&mut self, mut events: Vec<Event>, modifiers: egui::Modifiers) -> egui::FullOutput {
-        self.time += 1.0 / 60.0;
         events.insert(0, Event::ModifiersChanged(modifiers));
-        let input =
-            RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0))), time: Some(self.time), events, ..Default::default() };
+        self.frame_raw(events)
+    }
+
+    /// A frame without an injected modifier event, including genuinely idle redraws.
+    pub(crate) fn frame_raw(&mut self, events: Vec<Event>) -> egui::FullOutput {
+        self.time += 1.0 / 60.0;
+        let input = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, self.size)), time: Some(self.time), events, ..Default::default() };
         let app = &mut self.app;
         let mut out = self.ctx.run_ui(input, |ui| app.ui(ui));
         out.textures_delta.clear();

@@ -925,7 +925,7 @@ fn publish_form(app: &mut FigApp, ui: &mut Ui, w: f32, doc: &Document) {
         form = PublishForm::default();
         // Other files read the saved file.
         app.save();
-        let saved = app.session.ds().is_ok_and(|d| d.path.is_some() && !d.is_dirty());
+        let saved = app.session.ds().is_ok_and(|d| d.path.is_some() && !app.session.file_is_dirty(d.uid));
         let v = r["version"].as_u64().unwrap_or(0);
         app.toast(if saved {
             trf("Published version {v}", &[("v", &v)])
@@ -1100,11 +1100,16 @@ fn enabled_libraries(app: &mut FigApp, ui: &mut Ui, w: f32, doc: &Document) {
             trn("Swapped {n} assets; {missed} had no match and still use the old library", moved as usize, &[("missed", &missed)])
         });
     }
-    if add
-        && let Some(p) = app.services.pick_open(tr("Add library"), &["figcraft"])
-        && let Some(r) = app.run(ADD, json!({"path": p.to_string_lossy()}))
-    {
-        added(app, &r);
+    if add {
+        app.import_copy(
+            tr("Add library"),
+            &["figcraft"],
+            Box::new(|app, path| {
+                if let Some(r) = app.run(ADD, json!({"path": path.to_string_lossy()})) {
+                    added(app, &r);
+                }
+            }),
+        );
     }
 }
 

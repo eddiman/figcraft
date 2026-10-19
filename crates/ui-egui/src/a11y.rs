@@ -107,6 +107,11 @@ enum Move {
     To(Region),
 }
 
+struct SheetFocus {
+    id: Option<Id>,
+    region: Region,
+}
+
 /// Keyboard navigation state (in [`crate::UiState`]).
 #[derive(Default)]
 pub struct Nav {
@@ -124,9 +129,15 @@ pub struct Nav {
     opener: Option<(Id, LayerId)>,
     /// A control the keyboard moved to: the properties panel scrolls it into view.
     scroll_to: Option<Id>,
+    sheet_return: Option<SheetFocus>,
+    frame_focus: Option<Id>,
 }
 
 impl Nav {
+    /// Completed drawing records for input ownership at the next raw-input hook.
+    pub(crate) fn input_regions(&self) -> [Option<Rect>; 4] {
+        self.next.rects
+    }
     /// Move the keyboard `step` regions on (`view.nextRegion` / `view.previousRegion`).
     pub fn step(&mut self, step: i32) {
         self.pending = Some(match self.pending {
@@ -286,6 +297,10 @@ pub fn keyboard(ctx: &Context) -> bool {
 /// keys (F6, Tab, arrows, Escape), which are taken out of the input when they move the keyboard.
 pub fn begin(app: &mut FigApp, ctx: &Context) {
     app.ui.nav.last = std::mem::take(&mut app.ui.nav.next);
+    app.ui.nav.frame_focus = app.ui.nav.keyboard.then(|| ctx.memory(|m| m.focused())).flatten();
+    if (app.ui.adaptive.drawer.is_some() || app.owned_save_prompt_open()) && app.ui.nav.sheet_return.is_none() {
+        app.ui.nav.sheet_return = Some(SheetFocus { id: app.ui.nav.frame_focus, region: app.ui.nav.region });
+    }
     keys(app, ctx);
     let keyboard = app.ui.nav.keyboard;
     shared(ctx, |s| {
@@ -295,6 +310,13 @@ pub fn begin(app: &mut FigApp, ctx: &Context) {
         // Written again by the focused control as it draws.
         s.name.clear();
     });
+}
+
+pub(crate) fn sheet_opened(app: &mut FigApp, ctx: &Context) {
+    if app.ui.nav.sheet_return.is_none() {
+        app.ui.nav.sheet_return =
+            Some(SheetFocus { id: app.ui.nav.keyboard.then(|| ctx.memory(|m| m.focused())).flatten(), region: app.ui.nav.region });
+    }
 }
 
 fn keys(app: &mut FigApp, ctx: &Context) {
@@ -321,9 +343,20 @@ fn keys(app: &mut FigApp, ctx: &Context) {
     {
         app.ui.nav.region = r;
     }
-    // Dialogs, the Actions palette and the presenter keep egui's own keyboard handling.
+    let pressed = |k: Key, m: Modifiers| {
+        ctx.input(|i| {
+            i.events.iter().any(|e| matches!(e, Event::Key { key, pressed: true, modifiers, .. } if *key == k && modifiers.matches_exact(m)))
+        })
+    };
+    // Modal Tab stays with egui; a focused layer row retains its shared commands.
     if blocked(app) {
         app.ui.nav.pending = None;
+        if app.ui.adaptive.drawer.is_some()
+            && app.ui.nav.last.row_focused
+            && widget.is_some_and(|w| ctx.memory(|m| m.top_modal_layer()) == Some(w.layer_id))
+        {
+            layer_keys(app, ctx, pressed);
+        }
         return;
     }
     // F6 / Shift+F6 (and the commands they run).
@@ -346,12 +379,6 @@ fn keys(app: &mut FigApp, ctx: &Context) {
         return;
     }
     let region = app.ui.nav.region;
-    // The modifiers each key was pressed with (not the ones held when the frame began).
-    let pressed = |k: Key, m: Modifiers| {
-        ctx.input(|i| {
-            i.events.iter().any(|e| matches!(e, Event::Key { key, pressed: true, modifiers, .. } if *key == k && modifiers.matches_exact(m)))
-        })
-    };
     // Tab moves between the region's controls (on the canvas it stays the select-next shortcut).
     // A layer rename takes Tab itself (on to the next row's name).
     let tab = if pressed(Key::Tab, Modifiers::NONE) {
@@ -403,20 +430,7 @@ fn keys(app: &mut FigApp, ctx: &Context) {
             }
         }
         Region::Layers if in_region && app.ui.nav.last.row_focused => {
-            // The canvas shortcuts are off while a row has the keyboard: rename (F2, Cmd/Ctrl+R)
-            // and the context menu (Shift+F10) work on its layer here.
-            if let Some((id, key, m)) = binding_pressed(ctx, &["object.rename", "view.contextMenu"]) {
-                ctx.input_mut(|i| i.consume_key(m, key));
-                crate::shortcuts::run_binding(app, id);
-            }
-            for k in arrows {
-                let shift = matches!(k, Key::ArrowUp | Key::ArrowDown) && pressed(k, Modifiers::SHIFT);
-                if (pressed(k, Modifiers::NONE) || shift) && crate::layers::key_nav(app, k, shift) {
-                    ctx.input_mut(|i| i.consume_key(if shift { Modifiers::SHIFT } else { Modifiers::NONE }, k));
-                    app.ui.nav.keyboard = true;
-                    app.ui.nav.refocus = 3;
-                }
-            }
+            layer_keys(app, ctx, pressed);
         }
         _ => {}
     }
@@ -445,6 +459,22 @@ fn keys(app: &mut FigApp, ctx: &Context) {
         && let Some(c) = app.ui.nav.last.canvas
     {
         ctx.memory_mut(|m| m.request_focus(c));
+    }
+}
+
+fn layer_keys(app: &mut FigApp, ctx: &Context, pressed: impl Fn(Key, Modifiers) -> bool) {
+    if let Some((id, key, m)) = binding_pressed(ctx, &["object.rename", "view.contextMenu"]) {
+        ctx.input_mut(|i| i.consume_key(m, key));
+        crate::shortcuts::run_binding(app, id);
+    }
+    for key in [Key::ArrowLeft, Key::ArrowRight, Key::ArrowUp, Key::ArrowDown] {
+        let shift = matches!(key, Key::ArrowUp | Key::ArrowDown) && pressed(key, Modifiers::SHIFT);
+        if (pressed(key, Modifiers::NONE) || shift) && crate::layers::key_nav(app, key, shift) {
+            ctx.memory_mut(|m| m.move_focus(FocusDirection::None));
+            ctx.input_mut(|i| i.consume_key(if shift { Modifiers::SHIFT } else { Modifiers::NONE }, key));
+            app.ui.nav.keyboard = true;
+            app.ui.nav.refocus = 3;
+        }
     }
 }
 
@@ -510,7 +540,31 @@ pub fn end(app: &mut FigApp, ctx: &Context) {
     if !menus_open(app) {
         app.ui.nav.next.popup = None;
     }
+    let sheet_open = app.ui.adaptive.drawer.is_some() || app.owned_save_prompt_open();
+    let restore_sheet = !sheet_open && !blocked(app);
+    let drop_origin = !app.has_files() || app.ui.home;
     let nav = &mut app.ui.nav;
+    if drop_origin {
+        nav.sheet_return = None;
+    } else if sheet_open && nav.sheet_return.is_none() {
+        nav.sheet_return = Some(SheetFocus { id: nav.frame_focus, region: nav.region });
+    }
+    if restore_sheet && nav.sheet_return.is_some() {
+        ctx.request_repaint();
+        // The modal layer stays active until its final pass has completed.
+        if ctx.memory(|m| m.top_modal_layer()).is_none()
+            && let Some(saved) = nav.sheet_return.take().filter(|_| nav.keyboard)
+            && let Some(id) = saved.id
+        {
+            let visible = ctx.viewport(|v| v.this_pass.widgets.get(id).is_some_and(|w| w.enabled && w.sense.is_focusable()));
+            if visible {
+                nav.region = saved.region;
+                ctx.memory_mut(|m| m.request_focus(id));
+            } else {
+                nav.go(if nav.shown(saved.region) { saved.region } else { Region::Canvas });
+            }
+        }
+    }
     if nav.refocus > 0 {
         nav.refocus -= 1;
         if let Some(id) = *Region::Layers.of(&nav.next.preferred) {
@@ -529,7 +583,9 @@ pub fn end(app: &mut FigApp, ctx: &Context) {
 /// Dialogs, the palette, the presenter and the home screen have no regions.
 fn blocked(app: &FigApp) -> bool {
     let u = &app.ui;
-    u.palette.is_some()
+    u.adaptive.drawer.is_some()
+        || app.owned_save_prompt_open()
+        || u.palette.is_some()
         || u.about
         || u.preferences
         || u.variables.is_some()

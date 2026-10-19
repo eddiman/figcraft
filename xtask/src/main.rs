@@ -1,6 +1,7 @@
 //! Project tasks: `cargo xtask <task>`.
 //!
 //! - `ci`      fmt check, clippy -D warnings, tests, layers, assets, wasm check
+//! - `ipad-fonts` verify the pinned external iPad font profile and bundle its licenses
 //! - `layers`  crate dependency layering check
 //! - `assets`  every file under assets/ and docs/ has a row in ATTRIBUTION.md
 //! - `parity`  menu-catalog coverage → docs/parity-checklist.md
@@ -14,6 +15,7 @@
 //!   with a synthetic design system used by 2,000 instances
 
 mod icon;
+mod ipad_fonts;
 mod layers;
 
 use std::process::{Command, ExitCode};
@@ -36,6 +38,7 @@ fn main() -> ExitCode {
     let task = args.first().map(String::as_str).unwrap_or("help");
     let ok = match task {
         "ci" => ci(),
+        "ipad-fonts" => ipad_fonts::run(&root(), &args[1..]),
         "layers" => layers::check(&root()),
         "assets" => assets(),
         "parity" => parity(),
@@ -45,7 +48,9 @@ fn main() -> ExitCode {
         "plugins" => plugins(),
         "bench" => bench(args.get(1).map_or("1000,10000,50000", String::as_str)),
         _ => {
-            eprintln!("tasks: ci, layers, assets, parity, version [set X.Y.Z], icon, wasm, plugins, bench [SIZES]");
+            eprintln!(
+                "tasks: ci, layers, assets, parity, version [set X.Y.Z], icon, wasm, plugins, bench [SIZES], ipad-fonts check DIR | bundle DIR APP"
+            );
             task == "help"
         }
     };

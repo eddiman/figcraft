@@ -902,6 +902,9 @@ impl Session {
     }
 
     pub fn set_tool(&mut self, t: ToolId) {
+        if !self.pointer_external_edit_or_notice() {
+            return;
+        }
         if self.tool.tool == ToolId::Pen && t != ToolId::Pen {
             let _ = self.pen_finish();
         }
@@ -929,6 +932,7 @@ impl Session {
 
     /// Feed one pointer event to the current tool.
     pub fn pointer(&mut self, ev: &PointerEvent) -> Result<()> {
+        self.pointer_external_edit()?;
         // A held button sends the same move every frame: running the gesture again would only
         // rebuild the same preview (a new document, and a canvas render, every frame).
         if ev.kind != PointerKind::Move {
@@ -2127,6 +2131,7 @@ impl Session {
 
     /// Finish the pen path (Enter/Escape/double-click).
     pub fn pen_finish(&mut self) -> Result<()> {
+        self.pointer_external_edit()?;
         let pen = self.tool.pen.take();
         self.tool.overlay.pen.clear();
         self.tool.overlay.pen_handles.clear();
@@ -2179,6 +2184,7 @@ impl Session {
     /// Keys the current mode handles before menu shortcuts (vector edit mode's tools and point
     /// keys, Enter to finish the shape builder). Returns whether the key was used.
     pub fn tool_key(&mut self, name: &str, shift: bool, alt: bool, cmd: bool) -> Result<bool> {
+        self.pointer_external_edit()?;
         if self.ds().is_ok_and(|d| d.vector_edit.is_some()) {
             return crate::vectoredit::key(self, name, shift, alt, cmd);
         }
@@ -2242,6 +2248,7 @@ impl Session {
     /// Enter with a shape or frame tool (`tool.place`): what a click with it makes, centred on `at`
     /// (default the middle of the view) and selected.
     pub fn place(&mut self, at: Option<Point>) -> Result<()> {
+        self.pointer_external_edit()?;
         let tool = self.tool.tool;
         let refuse = |why: &str| Err(crate::EngineError::Disabled("tool.place".into(), why.into()));
         if !tool.draws_shape() {
@@ -2265,6 +2272,7 @@ impl Session {
     /// Keyboard Escape: cancel gestures, finish pens, leave text editing, then deselect (in the
     /// focus view, once the focused frame or nothing is selected, it ends the focus view).
     pub fn escape(&mut self) -> Result<()> {
+        self.pointer_external_edit()?;
         // Following someone in a live session: Escape stops that first.
         if self.live_unfollow() {
             return Ok(());

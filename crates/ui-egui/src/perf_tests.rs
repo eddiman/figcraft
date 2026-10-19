@@ -20,6 +20,7 @@ struct Bench {
     ctx: egui::Context,
     app: FigApp,
     time: f64,
+    size: egui::Vec2,
 }
 
 impl Bench {
@@ -30,7 +31,12 @@ impl Bench {
 
     fn with_document(doc: Document) -> Self {
         figcraft_text::scan_system_fonts();
-        let mut b = Self { ctx: egui::Context::default(), app: FigApp::new(Session::with_document(doc), Box::new(NoServices)), time: 0.0 };
+        let mut b = Self {
+            ctx: egui::Context::default(),
+            app: FigApp::new(Session::with_document(doc), Box::new(NoServices)),
+            time: 0.0,
+            size: vec2(SCREEN.0, SCREEN.1),
+        };
         // Fonts install on the first frame; the next ones lay out and settle.
         for _ in 0..4 {
             b.frame(vec![]);
@@ -41,12 +47,7 @@ impl Bench {
     /// One UI frame with `events`; returns its wall time in ms.
     fn frame(&mut self, events: Vec<Event>) -> f64 {
         self.time += 1.0 / 60.0;
-        let input = RawInput {
-            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(SCREEN.0, SCREEN.1))),
-            time: Some(self.time),
-            events,
-            ..Default::default()
-        };
+        let input = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, self.size)), time: Some(self.time), events, ..Default::default() };
         let t = Instant::now();
         let app = &mut self.app;
         let mut out = self.ctx.run_ui(input, |ui| app.ui(ui));
@@ -348,4 +349,80 @@ fn prototype_sources_follow_edits_and_undo() {
     s.undo().unwrap();
     let undone = s.ds().unwrap().doc.clone();
     assert!(crate::proto_canvas::sources(&ctx, &undone, page).is_empty());
+}
+
+#[test]
+#[ignore = "host diagnostic: set FIGCRAFT_IPAD_CORPUS to the T01 generated archive directory"]
+fn ipad_render_profile() {
+    use crate::idle_tests::ipad_wait_for_worker;
+    use crate::render_worker::{Job, Worker};
+
+    figcraft_text::scan_system_fonts();
+    let corpus = std::path::PathBuf::from(std::env::var_os("FIGCRAFT_IPAD_CORPUS").expect("T01 corpus directory is required"));
+    let mut cases = vec![
+        ("synthetic-50", figcraft_engine::synthetic::large_document(50).unwrap().0),
+        ("synthetic-1000", figcraft_engine::synthetic::large_document(1000).unwrap().0),
+    ];
+    for name in ["large", "effect-heavy"] {
+        let (doc, issues) = figcraft_format::load_file(&corpus.join(format!("{name}.figcraft"))).unwrap();
+        assert!(issues.is_empty(), "{name}: {issues:?}");
+        cases.push((name, doc));
+    }
+    println!("T21 HOST diagnostic; optimized test profile; system fonts; no GPU upload/device timing");
+    for (name, doc) in cases {
+        let bytes = figcraft_format::save_bytes(&doc, None).unwrap();
+        let nodes = doc.nodes().count();
+        let mut ui = Bench::with_document(doc);
+        ui.size = vec2(800.0, 600.0);
+        ui.app.ui.adaptive.enabled = true;
+        for _ in 0..4 {
+            ui.frame(vec![]);
+            crate::idle_tests::wait_for_render(&ui.app);
+        }
+        let ui_ms = ui.mean(20, |_| vec![]);
+        drop(ui);
+        let mut totals = [0.0; 4];
+        for _ in 0..20 {
+            let start = Instant::now();
+            let (doc, issues) = figcraft_format::load_bytes(&bytes).unwrap();
+            assert!(issues.is_empty());
+            totals[0] += start.elapsed().as_secs_f64() * 1000.0;
+            let mut session = Session::with_document(doc);
+            session.execute("shape.rectangle", &json!({"x": 10, "y": 10, "width": 20, "height": 20})).unwrap();
+            let ds = session.ds().unwrap();
+            let job = Job {
+                doc: ds.doc.clone(),
+                page: ds.page,
+                view: figcraft_render::View { origin: (0.0, 0.0), scale: 1.0, width: 800, height: 600 },
+                outline: false,
+                outline_extras: Default::default(),
+                outlined: vec![],
+                skip: vec![],
+                solo: None,
+                proof: false,
+            };
+            let mut worker = Worker::new(egui::Context::default());
+            let start = Instant::now();
+            worker.submit(job.clone());
+            ipad_wait_for_worker(&worker);
+            let done = worker.poll().unwrap();
+            totals[1] += done.ms;
+            totals[2] += start.elapsed().as_secs_f64() * 1000.0;
+            let start = Instant::now();
+            let png = figcraft_render::render_view(&job.doc, job.page, &job.view, &Default::default()).unwrap().encode_png().unwrap();
+            assert!(!png.is_empty());
+            let saved = figcraft_format::save_bytes(&job.doc, None).unwrap();
+            let (reopened, issues) = figcraft_format::load_bytes(&saved).unwrap();
+            assert!(issues.is_empty());
+            assert_eq!(reopened.nodes().count(), nodes + 1);
+            totals[3] += start.elapsed().as_secs_f64() * 1000.0;
+        }
+        println!(
+            "T21 {name}: nodes={nodes}, cycles=20, mean_ms: open={:.3}, raster_convert={:.3}, submit_to_complete={:.3}, export_save_reopen={:.3}, warm_ui={ui_ms:.3}",
+            totals[0] / 20.0,
+            totals[1] / 20.0,
+            totals[2] / 20.0,
+            totals[3] / 20.0,
+        );
+    }
 }

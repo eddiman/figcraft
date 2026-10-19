@@ -1,6 +1,120 @@
 # FigCraft Roadmap
 
+Local iPad canvas-focus repair, 2026-10-19: T20 traced disappearing native
+input to missing shared IME output on event-free redraws. The shared handler
+now preserves active canvas text presentation before returning for empty
+events. Five text regressions, full CI (2,591/0/10), both iOS checks and native
+canvas/field/idle-transfer diagnostics pass; recovery contains the exact
+typed strings. D20 revision 1 records the bounded review. Physical composition,
+native range/undo semantics and keyboard variants remain unqualified; T20
+stays blocked and T32 undecided. No native adapter or dependency changed.
+
+Local iPad retained-UI audit, 2026-10-19: T22 repairs 44-point touch-tool
+targets, focus names/scrolling, drawer/save-prompt keyboard restoration and
+the touch Save route. Six shared regressions and an isolated native rectangle/
+inspector/drawer/invalid-name/corrected-save workflow pass. T22 stays review;
+physical workflows and T20/T32 remain unpassed. Excluded accessibility features
+are unchanged.
+
+Local iPad text diagnostics, 2026-10-19: T20 adds Unicode, marked-text,
+replacement, paste/undo and numeric-field ownership regressions. Native
+simulator fields accept accent/emoji strings, but canvas typing lacks native
+keyboard focus in both optional-no-font and validated-font builds. D20 records
+the reproduction and remediation boundary. T20 is blocked; T32 is undecided.
+
+Local iPad integration preparation, 2026-10-19: T24 now records the integrated
+baseline, toolchain/font/dependency pins, ten patch intents and compatibility
+limits. The baseline remains an ancestor; 64 existing baseline files are
+modified at checkpoint 3495727. No newer upstream merge or hardware smoke was
+performed. T24 remains review; distribution and release gates are unchanged.
+
+Local iPad rendering checkpoint, 2026-10-19: T21 bounds native rendering to
+one pending job and one completed image. The paused-consumer burst retains
+four document references instead of 1,003; latest-view completion, invalid-view
+recovery, shutdown and adaptive idle regressions pass. Eighty host diagnostic
+editing/export cycles are recorded in docs/ipad/performance, separately from
+iPad performance. Full CI passes 2,580/0/10, both iOS targets check, and a
+native simulator drawer/rotation rendering smoke passes. Physical performance,
+GPU presentation and memory-pressure integration remain open; T21 is review.
+
+Local iPad presentation checkpoint, 2026-10-18: T19 adds opt-in responsive
+shared panels, modal drawers, allocated touch controls and finger-only
+multi-select/constrain toggles. Layers and Assets retain existing command
+routes; desktop/browser presentation remains unchanged. A safe typed UIKit
+keyboard-layout-guide query supplies geometry without new unsafe code.
+Shared UI tests pass 595/0/1 and both iOS target checks pass. Rendered
+600/800/1200-point layouts and supplied keyboard bounds were inspected.
+Full CI passes 2,576/0/9, including web and plugin WASM builds.
+Two T19-only native XCTest checks pass drawer open/close, rotation and toolbar
+avoidance above the visible software keyboard in portrait and landscape.
+Earlier failures also reproduced in Settings and cleared after a Simulator GUI
+restart with a temporary hardware-keyboard override; no production input fix
+was needed. T19 remains in review for the deferred physical touch-only
+walkthrough and keyboard variants. T23 qualification was not repeated.
+
+iPad automation checkpoint, 2026-10-18: T23 is complete. Hosted unsigned
+device/simulator jobs, Linux/workspace CI, web compilation and packaging lint
+pass on `c1eff4e` in `eddiman/figcraft`. The isolated XCTest covers field input,
+an exact fixture edit and cold restart with the edited position retained;
+the separate deliberate assertion proves failure propagation. Local CI passes
+2,568/0/9 and hosted Linux tests pass 2,563/0/8. Qualification repaired a guarded
+directory change and renamed eight downstream atomic calls to the Rust
+1.95-compatible `try_update`, without changing runtime semantics or lint policy.
+Physical qualification is unchanged and the full port is unfinished.
+
+Local iPad persistence checkpoint, 2026-10-18: T10 now implements Save/Save As
+through captured snapshots, bounded/coalescing document workers and synchronized
+writes. Acknowledgements drive saved/dirty status and closed-tab recents.
+Simulator Save As, edited Save and persisted-recents reopening after relaunch
+pass, including archive/UI agreement on the edited fixture coordinates.
+Full CI passes 2,568/0/9; app=54/0/0, UI=587/0/1, both iOS checks and simulator
+linking pass. T10 joins T13 in review for remaining physical qualification;
+the full port is unfinished and later dependency gates remain unreleased.
+
+Local T13 canvas batching coverage, 2026-10-18: five new tests combine the
+production input partitioner, Native coordinator and editor, covering redraw
+backlogs, exact undo counts, field ownership and cancellation barriers.
+The app suite passes 42 tests with all-target Clippy. Simulator burst injection
+did not reliably reach the native handler, so native backlog responsiveness
+remains unqualified. This follow-up changes tests only and releases no gate.
+
+Local T13 simulator checkpoint, 2026-10-18: the current production build passes
+observed tap-to-focus, field Select All/Copy/Cut/Paste, Escape to canvas,
+single canvas Paste/Undo and tap-back ownership. One same-process background/
+foreground cycle retains state and accepts subsequent field input. These checks
+do not qualify physical input, permissions, images, actual suspension or input
+backlogs. Evidence is in the external T13 result; no plan gate is released.
+
+Local T13 host-loop checkpoint, 2026-10-18: six new headless regressions exercise
+the actual eframe update loop across redraw limits, hidden/resumed input, output
+merging and close handling. Both native bridge scripts run the suite. Full CI
+passes 2,545 tests with nine ignored; those six excluded-workspace tests pass
+separately. Both app target checks pass. Interactive and physical qualification
+remain open, and no plan gate is released.
+
+Local T13 ordering checkpoint, 2026-10-18: the native host partitions accumulated
+input before egui collapses click ownership. It consumes each event once, runs at
+most eight input batches per redraw, and retains the suffix in its existing
+pending-input buffer. Seven new host regressions cover field and writer ordering,
+Escape, repeated taps, native panel normalization and suffix/metadata preservation.
+Full CI passes 2,545 tests with nine ignored; the latest simulator executable
+renders the synthetic editor. Interactive input, lifecycle/performance and device
+qualification remain open. No plan gate is released.
+
+Local T13 checkpoint, 2026-10-18: owned text/image clipboard and pinned input
+dependency patches are integrated for development. The production follow-up fixes
+PNG copy failure reporting, invalid write receipts and bounds RGBA expansion before
+decoding. Tagged clipboard images now convert to sRGB using bounded ICC/PNG
+metadata handling. Ten app-host regressions exercise production field focus and
+callback ownership; the bridge script checks both native crates. Full CI,
+both iOS checks, standalone clipboard checks and linked simulator rendering pass.
+Interactive/device qualification remains incomplete. T10's isolated destination
+coordinator remains test-only until its persistence prerequisites pass. See
+maintenance/ipad-deps/README.md for this checkpoint's scope.
+
 **Stage: alpha** · next: beta, ~26 points and ~162–292 h away (one Opus 5.5 agent; ~33–67 h wall-clock with 5 agents)
+
+Local iPad port, 2026-10-16: T33 adds owned nested export trees to the platform dispatcher. The desktop adapter preserves batch folders and rejects invalid paths and observed symlinks. T06 routes shared dialogs through the dispatcher and captures export bytes before presentation. T07 now connects the iPad system picker with owned import copies and retained export staging, including folder exports. Simulator import, duplicate-name, cancellation and PNG round-trip checks passed; physical-device checks and durable native saving remain pending. T09 adds immutable whole-file saves and stale-completion guards while preserving desktop save behavior. T11 extracts complete recovery checkpoints with retained worker ownership and coherent archive/note generations. T11 now installs startup recovery, foreground checkpoints and bounded native lifecycle flushing; its physical-device qualification remains deferred. T15 adds an opt-in local pointer checkpoint that preserves earlier text and pen work during cancellation. T34 adds passive native touch observation, ordered input dispatch for an explicit consumer, and UI cancellation barriers. T16 now adds a pure finger recognizer, anchored navigation and an opt-in value dispatcher with software integration tests. T16 also adds an opt-in combined finger and physical mouse route with source-specific clicks and wheel interpretation. T16 now guards unavailable app access and tests 54 specialized cancellation cases. Its opt-in normalizer also gives secondary panel contacts a fixed pointer owner while preserving independent physical input. Caught UI panics now cancel enrolled previews before recovery capture, and Native layout publication requires successful frame completion. The combined Native matrix now covers 45 fixtures across ten interruption causes, including handles, guides, vector edits and earlier text/freehand work. A wrapped vector-panel hint also keeps point selection from changing the canvas allocation. The native shell now selects the combined Native coordinator. Open comment/prototype UI cancellation tests pass, and linked simulator drawing, Undo/Redo, movement and resize after resume pass. A release-order regression also requires fresh drawing after both pinch contacts lift. T16 is now in review while its required device gesture qualification remains deferred. Runtime multi-touch remains unverified. T12 now pins an external seven-file font profile, validates font and license hashes during packaging, excludes native system scanning and uses explicit embedded fallbacks. A same-font T01 export is byte-identical on desktop and simulator; T12 is in review while device font comparison remains deferred. T13 now maps iOS to Apple shortcut tables; hardware-key delivery and native clipboard remain pending. Native destination writing remains pending. The app's qualification stage is unchanged. See [the port devlog](docs/ipad-devlog.md).
 
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-14 · **Change:** minor (system theme on first run; recent files as cards with thumbnails on the home screen; community fixes: lost images reported on loading (#207), SVG import budgets (#190), Leptos code (#223), full screen (#227), server snapshots readable again (#188), owner-only preferences (#200), ruzstd 0.9.1 (#182), layer cycle repair (#205), batch rollback, Direct3D 12 on Windows, plugin metering (#192); vector edit mode regions: hover hatch, selection and drag; SVG/PDF exports refuse over-depth documents (#208); bounded MCP/control framing, connections and queues (#201); plugin log limits (#191); live-session revert guard (#198); attached MCP no longer replays after a lost reply (#194); repeat command recursion fix; the Layout panel's constrain-proportions link scales the other side, #220; core editor leftovers: component playground, auto gap handles, variables inside styles, inner shadows and background blur on groups, command-made text readable on dark pages, a one-step frame/group convert, delays on mouse triggers and manual overlay offsets, wrapped-line alignment; `.fig` export: instance sizes, variables with modes, shared styles, variable-width strokes; starter templates, a Templates tab and Getting started tips on the home screen; your online files; everyday editing partials: number fields, outline options, Hide when publishing, cursors, panel widths, dark pages; sharing with a join code; text box sizes measured against documents re-saved by other software; live sessions per document; .fig export checked by opening written files in other software; a public figcraft-server: open hosting, owner tokens, per-address limits, idle expiry, moderation, install.sh; experimental .fig export; keyboard shortcut parity suite and bindings; Simplified Chinese draft catalog; Latin American Spanish overlay; prototyping tail: gamepad triggers, widgets in prototypes, mode lookups; plugin directory on figcraft-server; Japanese and Korean draft catalogs and CJK UI fonts; plugin widgets and the plugin panel tail; French, German and Brazilian Portuguese draft catalogs; cursor chat and spotlight in live sessions; layers and assets panels behaviour suite and fixes; vector multi-edit and edit tail; dev resources links; extended collections tail; branch version history and finer list merges; headline percentages recomputed from the area table: feature breadth ~84%, core ~94%, mainstream ~50%; text lists, hanging punctuation and decoration styles; comments and version history behaviour suite and fixes; canvas navigation, guides and grids behaviour suite and fixes; export and inspect behaviour suite and fixes; .fig import: editable vector networks and more layer kinds; shapes and vector behaviour suite and fixes; paint and effects behaviour suite and fixes; frames, groups, sections and masks behaviour suite and fixes; styles and variables behaviour suite and fixes; prototyping behaviour suite and fixes; components behaviour suite and fixes; embedded image colour profiles; layers panel keyboard: F2 rename, Shift+F10 context menu, keyboard box selection, 10k-layer QA; per-side stroke weight variables; text behaviour suite: CJK line breaking, metrics, vertical trim; selection and transform behaviour suite and fixes; `.fig` import, best effort; Windows QA pass with eight fixes; auto layout behaviour suite and fixes; Display P3: gamut warning and soft-proof (true P3 blocked upstream); several windows; localization layer with a draft Spanish catalog; hosting figcraft-server: wss in the desktop app, server releases, deployment guide; plugin panels and settings; canvas fixes: boolean hit testing on the result, group drags, frame outlines and slices; code connect; stretch and scatter brushes, pen pressure; text on a path and pattern fills; team libraries on the server and swap library; branches: create, update from main, review and merge; animated GIF fills and TIFF images; Open recent, outlines for the selection and mask outlines: menu breadth 100%; extended collections, variables import/export, gradient stop and variant bindings; feature breadth ~80%; ready ~49%) · **Target:** Figma Design (desktop app 126.10.7)
 
@@ -313,6 +427,7 @@ Ranked; detail and milestones in [`docs/roadmap.md`](docs/roadmap.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-16 | minor | T34 iPad input boundary: passive raw touch observation, an explicit ordered consumer API and UI cancellation barriers preserve earlier typing and remove drag owners before reset release. Native touch activation and device qualification remain pending. |
 | 2026-10-14 | minor | System theme on first run (M7): preferences without a theme default to System; the first frame reads the OS appearance directly, including when returning from a manual theme. Saved Light/Dark choices stay explicit; unavailable OS appearance falls back to Light. Numbers unchanged. |
 | 2026-10-14 | minor | Home screen recent files as cards (M7): each card shows the picture its file carries on its first page's colour, the file's icon, name and "Edited ... ago"; sort by name, creation or last change either way; a table view; a click selects, a double-click or Enter opens, arrow keys move; Open, Show in folder and Remove from recents on right-click. Numbers unchanged. |
 | 2026-10-14 | minor | Lost images reported on loading (#207): a `.figcraft` file whose image member is damaged, too large or missing no longer loads in silence; each lost image (up to 20, then a count) is listed in `repairs` on `file.open` with its hash and the reason, and the app shows it as a toast. Saving still writes the file without the lost images. Numbers unchanged |

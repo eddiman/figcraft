@@ -64,6 +64,49 @@ pub fn paste(app: &mut FigApp, event_text: Option<&str>) {
     app.run("edit.paste", json!({}));
 }
 
+/// Consume one already-owned native outcome without invoking legacy getters.
+pub fn paste_owned(app: &mut FigApp, outcome: &egui::PasteOutcome) {
+    match outcome {
+        egui::PasteOutcome::Empty | egui::PasteOutcome::Unsupported => {}
+        egui::PasteOutcome::Failed(error) => app.toast(format!("Clipboard paste failed: {error:?}")),
+        egui::PasteOutcome::Content(content) => {
+            if let Err(error) = content.validate() {
+                app.toast(format!("Clipboard paste failed: {error:?}"));
+                return;
+            }
+            if !app.session.clipboard.nodes.is_empty()
+                && app.ui.native_copy.as_ref().is_some_and(|association| association.matches(content.identity.as_ref(), &app.session.clipboard))
+            {
+                app.run("edit.paste", json!({}));
+                return;
+            }
+            let (cx, cy) = app.session.ds().map(|d| (d.view.cx, d.view.cy)).unwrap_or((0.0, 0.0));
+            if let Some(image) = &content.image {
+                let Some(image) = image::RgbaImage::from_raw(image.width, image.height, image.rgba.clone()) else {
+                    return;
+                };
+                let mut png = std::io::Cursor::new(Vec::new());
+                if let Err(error) = image.write_to(&mut png, image::ImageFormat::Png) {
+                    app.toast(error.to_string());
+                    return;
+                }
+                use base64::Engine as _;
+                app.run(
+                    "file.import",
+                    json!({"data":base64::engine::general_purpose::STANDARD.encode(png.into_inner()),"name":"Pasted image.png","x":cx,"y":cy}),
+                );
+            } else if let Some(text) = content.text.as_deref().filter(|s| !s.is_empty()) {
+                if figcraft_engine::looks_like_svg(text) {
+                    use base64::Engine as _;
+                    app.run("file.import", json!({"data":base64::engine::general_purpose::STANDARD.encode(text.as_bytes()),"name":"Pasted SVG.svg","x":cx,"y":cy,"center":true}));
+                } else {
+                    app.run("text.create", json!({"text":text,"x":cx,"y":cy}));
+                }
+            }
+        }
+    }
+}
+
 /// The system clipboard's image as PNG bytes, with its size.
 fn clipboard_png(app: &mut FigApp) -> Option<(Vec<u8>, u32, u32)> {
     let (w, h, rgba) = app.services.clipboard_get_image()?;
@@ -107,8 +150,15 @@ pub fn invoke(app: &mut FigApp, id: &str) {
                 // Clipboard images are read as sRGB.
                 figcraft_render::to_srgb(&mut pix, profile);
                 let rgba = figcraft_render::to_rgba8(&pix);
-                app.services.clipboard_set_png(pix.width(), pix.height(), &rgba);
-                app.toast(tr("Copied as PNG"));
+                if app.services.clipboard_requires_confirmation() {
+                    match app.services.clipboard_try_set_png(pix.width(), pix.height(), &rgba) {
+                        Ok(()) => app.toast(tr("Copied as PNG")),
+                        Err(error) => app.toast(error),
+                    }
+                } else {
+                    app.services.clipboard_set_png(pix.width(), pix.height(), &rgba);
+                    app.toast(tr("Copied as PNG"));
+                }
             }
         }
         "edit.copyAsText" => {
@@ -135,15 +185,44 @@ pub fn invoke(app: &mut FigApp, id: &str) {
             let ids = app.session.selection();
             // SVG for other apps, taken before a cut removes the layers.
             let svg = app.session.doc().ok().and_then(|d| figcraft_svg_export(d, &ids));
-            app.run(id, json!({}));
-            // Mirror to the system clipboard (SVG text, else a marker) and remember it, so a later
-            // paste knows whether the clipboard still holds our layers.
-            let text = svg.unwrap_or_else(|| format!("figcraft://clipboard/{}", ids.len()));
-            app.services.clipboard_set_text(&text);
-            app.ui.last_copy = Some(text);
+            // Confirmed native writes happen before the command can remove layers
+            // or replace the internal copy. Legacy adapters keep their ordering.
+            if app.services.clipboard_requires_confirmation() {
+                app.ui.native_copy = None;
+                if ids.is_empty() {
+                    app.run(id, json!({}));
+                    return;
+                }
+                let text = svg.unwrap_or_else(|| format!("figcraft://clipboard/{}", ids.len()));
+                match app.services.clipboard_try_set_layers(&text) {
+                    Ok(receipt) => {
+                        if app.run(id, json!({})).is_some() {
+                            app.ui.last_copy = Some(text);
+                            app.ui.native_copy = receipt.and_then(|receipt| {
+                                let content = egui::PasteContent { text: None, image: None, identity: Some(receipt.clone()) };
+                                content.validate().is_ok().then(|| crate::clipboard_identity::Association::new(receipt, &app.session.clipboard))
+                            });
+                        }
+                    }
+                    Err(error) => app.toast(error),
+                }
+            } else {
+                app.run(id, json!({}));
+                let text = svg.unwrap_or_else(|| format!("figcraft://clipboard/{}", ids.len()));
+                app.services.clipboard_set_text(&text);
+                app.ui.last_copy = Some(text);
+            }
         }
-        "edit.paste" => paste(app, None),
-        "file.close" if app.session.ds().is_ok_and(|d| d.is_dirty() && d.branch_of.is_none()) => {
+        "edit.paste" => {
+            if let Some(outcome) = app.services.clipboard_read_owned() {
+                paste_owned(app, &outcome);
+            } else if app.services.clipboard_requires_confirmation() {
+                app.toast("Clipboard paste is unavailable");
+            } else {
+                paste(app, None);
+            }
+        }
+        "file.close" if app.session.ds().is_ok_and(|d| app.session.file_is_dirty(d.uid) && d.branch_of.is_none()) => {
             let save = pretty_shortcut(crate::shortcuts::shortcut("file.save").unwrap_or(""));
             app.toast(trf(
                 "Unsaved changes: save first ({save}), or close the tab with {alt}-click to discard",
@@ -193,7 +272,7 @@ fn menu_level(app: &mut FigApp, ui: &mut Ui, prefix: &str) -> bool {
                 continue;
             }
             // One window in the browser.
-            let enabled = available(m.id) && !(m.id == "window.new" && ui.ctx().embed_viewports());
+            let enabled = available(m.id) && !(m.id == "window.new" && (ui.ctx().embed_viewports() || !app.services.capabilities().multiple_windows));
             let checked = figcraft_engine::cmd::view::checked(&app.session, m.id).unwrap_or(false);
             if item(ui, &i18n::menu_item(m.id, m.label), crate::shortcuts::shortcut(m.id).unwrap_or(""), enabled, checked, &t) && enabled {
                 clicked = Some(m.id);

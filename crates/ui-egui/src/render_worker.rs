@@ -84,9 +84,17 @@ fn run(job: &Job, retained: &mut Retained) -> Option<Done> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+#[derive(Default)]
+struct Mailbox {
+    pending: Option<(u64, Job)>,
+    done: Option<Done>,
+    closing: bool,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub struct Worker {
-    tx: std::sync::mpsc::Sender<(u64, Job)>,
-    rx: std::sync::mpsc::Receiver<Done>,
+    tx: std::sync::mpsc::SyncSender<()>,
+    mailbox: Arc<std::sync::Mutex<Mailbox>>,
     /// Jobs submitted so far.
     submitted: u64,
     /// The newest job the thread is done with: rendered (or skipped for a newer one) and the UI
@@ -97,46 +105,79 @@ pub struct Worker {
 #[cfg(not(target_arch = "wasm32"))]
 impl Worker {
     pub fn new(ctx: egui::Context) -> Self {
-        let (tx, jobs) = std::sync::mpsc::channel::<(u64, Job)>();
-        let (done_tx, rx) = std::sync::mpsc::channel::<Done>();
+        let (tx, jobs) = std::sync::mpsc::sync_channel::<()>(1);
+        let mailbox = Arc::new(std::sync::Mutex::new(Mailbox::default()));
+        let queue = mailbox.clone();
         let finished = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let done_with = finished.clone();
         // The window that renders with it (each window has its own worker).
         let viewport = ctx.viewport_id();
         let spawned = std::thread::Builder::new().name("figcraft-render".into()).spawn(move || {
             let mut retained = Retained::default();
-            while let Ok((mut seq, mut job)) = jobs.recv() {
-                // Skip to the newest queued job.
-                while let Ok(newer) = jobs.try_recv() {
-                    (seq, job) = newer;
-                }
+            while jobs.recv().is_ok() {
+                let next = {
+                    let Ok(mut queue) = queue.lock() else {
+                        log::error!("Render worker stopped: mailbox lock is poisoned");
+                        break;
+                    };
+                    if queue.closing {
+                        break;
+                    }
+                    queue.pending.take()
+                };
+                let Some((seq, job)) = next else { continue };
                 let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&job, &mut retained)));
                 let done = match res {
                     Ok(d) => d,
                     Err(_) => {
+                        log::error!("Canvas renderer panicked; discarding its retained image");
                         // Don't build on an image a panic may have left half drawn.
                         retained.clear();
                         None
                     }
                 };
-                if let Some(d) = done
-                    && done_tx.send(d).is_err()
                 {
-                    break;
+                    let Ok(mut queue) = queue.lock() else {
+                        log::error!("Render worker cannot deliver completion: mailbox lock is poisoned");
+                        break;
+                    };
+                    if queue.closing {
+                        break;
+                    }
+                    if let Some(done) = done {
+                        queue.done = Some(done);
+                    } else {
+                        log::warn!("Canvas render produced no image");
+                    }
                 }
                 ctx.request_repaint_of(viewport);
                 done_with.store(seq, std::sync::atomic::Ordering::Release);
             }
+            done_with.store(u64::MAX, std::sync::atomic::Ordering::Release);
+            ctx.request_repaint_of(viewport);
         });
         if let Err(e) = spawned {
             log::error!("render thread: {e}");
         }
-        Self { tx, rx, submitted: 0, finished }
+        Self { tx, mailbox, submitted: 0, finished }
     }
 
     pub fn submit(&mut self, job: Job) {
-        if self.tx.send((self.submitted + 1, job)).is_ok() {
-            self.submitted += 1;
+        let Some(seq) = self.submitted.checked_add(1) else {
+            log::error!("Canvas render sequence exhausted");
+            return;
+        };
+        let Ok(mut queue) = self.mailbox.lock() else {
+            log::error!("Cannot submit canvas render: mailbox lock is poisoned");
+            return;
+        };
+        queue.pending = Some((seq, job));
+        match self.tx.try_send(()) {
+            Ok(()) | Err(std::sync::mpsc::TrySendError::Full(())) => self.submitted = seq,
+            Err(std::sync::mpsc::TrySendError::Disconnected(())) => {
+                queue.pending = None;
+                log::error!("Cannot submit canvas render: worker stopped");
+            }
         }
     }
 
@@ -147,11 +188,27 @@ impl Worker {
     }
 
     pub fn poll(&mut self) -> Option<Done> {
-        let mut last = None;
-        while let Ok(d) = self.rx.try_recv() {
-            last = Some(d);
+        match self.mailbox.lock() {
+            Ok(mut queue) => queue.done.take(),
+            Err(error) => {
+                log::error!("Cannot poll canvas render: {error}");
+                None
+            }
         }
-        last
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for Worker {
+    fn drop(&mut self) {
+        match self.mailbox.lock() {
+            Ok(mut queue) => {
+                queue.closing = true;
+                queue.pending = None;
+                queue.done = None;
+            }
+            Err(error) => log::error!("Cannot clear closing render worker: {error}"),
+        }
     }
 }
 
@@ -181,4 +238,42 @@ impl Worker {
 /// Render synchronously from scratch (tests, screenshots).
 pub fn render_now(job: &Job) -> Option<Done> {
     run(job, &mut Retained::default())
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+    use crate::idle_tests::{ipad_render_job, ipad_wait_for_worker};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn ipad_render_completed_slot_and_shutdown_are_bounded() {
+        let mut worker = Worker::new(egui::Context::default());
+        let mailbox = worker.mailbox.clone();
+        let mut job = ipad_render_job();
+        job.view.width = 1024;
+        job.view.height = 768;
+        let document = Arc::downgrade(&job.doc);
+        for i in 0..20 {
+            job.view.origin.0 = f64::from(i);
+            worker.submit(job.clone());
+            ipad_wait_for_worker(&worker);
+            let queue = mailbox.lock().unwrap();
+            assert!(queue.pending.is_none());
+            assert_eq!(queue.done.as_ref().unwrap().view.origin.0, f64::from(i));
+        }
+        for _ in 0..1000 {
+            worker.submit(job.clone());
+        }
+        drop(job);
+        drop(worker);
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while Arc::strong_count(&mailbox) > 1 {
+            assert!(Instant::now() < deadline, "the closing render thread retained its document");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let queue = mailbox.lock().unwrap();
+        assert!(queue.closing && queue.pending.is_none() && queue.done.is_none());
+        assert!(document.upgrade().is_none());
+    }
 }

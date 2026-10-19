@@ -588,8 +588,15 @@ impl FontDb {
         faces.into_iter().min_by_key(|f| cost(f)).cloned()
     }
 
-    /// The default face (Inter Regular if embedded, else any system sans).
+    /// The default face (BIZ UDPGothic on iPad; otherwise Inter, then a system sans).
     pub fn default_face(&mut self) -> Option<Arc<Face>> {
+        self.default_face_for(cfg!(target_os = "ios"))
+    }
+
+    fn default_face_for(&mut self, ipad: bool) -> Option<Arc<Face>> {
+        if ipad && let Some(face) = self.find("BIZ UDPGothic", "Regular") {
+            return Some(face);
+        }
         for fam in ["Inter", "Helvetica Neue", "Helvetica", "Arial", "Segoe UI", "Roboto", "DejaVu Sans", "Liberation Sans", "Noto Sans"] {
             if let Some(f) = self.find(fam, "Regular") {
                 return Some(f);
@@ -615,6 +622,7 @@ impl FontDb {
             "Microsoft YaHei",
             "Apple Color Emoji",
             "Noto Sans Arabic",
+            "Noto Sans Thai",
             "Apple Symbols",
             "Segoe UI Symbol",
         ] {
@@ -632,6 +640,9 @@ impl FontDb {
     /// Index the system font directories (desktop only): family names are read now, faces loaded
     /// when first used. Safe to call more than once.
     pub fn scan_system(&mut self) {
+        if cfg!(any(target_os = "ios", target_arch = "wasm32")) {
+            return;
+        }
         if self.system_scanned {
             return;
         }
@@ -666,7 +677,7 @@ fn system_font_dirs() -> Vec<std::path::PathBuf> {
             v.push(std::path::PathBuf::from(l).join("Microsoft\\Windows\\Fonts"));
         }
     }
-    #[cfg(all(unix, not(target_os = "macos")))]
+    #[cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_arch = "wasm32"))))]
     {
         v.push("/usr/share/fonts".into());
         v.push("/usr/local/share/fonts".into());
@@ -778,12 +789,12 @@ pub fn family_styles(family: &str) -> Vec<String> {
 }
 
 /// Scan system fonts into the global db (desktop; a no-op on the web, or with
-/// `FIGCRAFT_NO_SYSTEM_FONTS` set). Runs once per process: a concurrent caller waits for that scan.
+/// `FIGCRAFT_NO_SYSTEM_FONTS` set, or on iOS). Runs once per process: a concurrent caller waits for that scan.
 /// The directory walk runs without holding the database lock; results are merged in one short write.
 pub fn scan_system_fonts() {
     SCANNED.get_or_init(|| {
         #[cfg(not(target_arch = "wasm32"))]
-        if !system_fonts_opted_out() {
+        if !cfg!(target_os = "ios") && !system_fonts_opted_out() {
             SCANS.fetch_add(1, Ordering::Relaxed);
             let mut found: BTreeMap<String, (String, Vec<Pending>)> = BTreeMap::new();
             for dir in system_font_dirs() {

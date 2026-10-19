@@ -871,6 +871,13 @@ impl Session {
     /// stay where they can, and the undo history isn't touched.
     pub fn apply_remote(&mut self, uid: u64, doc: Arc<Document>) {
         let Some(ds) = self.docs.iter_mut().find(|d| d.uid == uid) else { return };
+        // Collaboration replicas omit the local published-library snapshot. Keep
+        // the underlying file's publication through subsequent remote updates.
+        let publication = ds.document_itself().published.clone();
+        let mut doc = doc;
+        if doc.published.is_none() && publication.is_some() {
+            Arc::make_mut(&mut doc).published = publication;
+        }
         ds.doc = doc;
         if !ds.doc.pages.contains(&ds.page) {
             ds.page = ds.doc.first_page().unwrap_or(ds.page);
@@ -925,11 +932,19 @@ impl Session {
     /// Take in what happened in every session (the UI calls it every frame; the network wakes the
     /// UI when something arrives). Returns whether anything changed.
     pub fn live_poll(&mut self) -> bool {
+        self.live_poll_with_barrier(|_| {})
+    }
+
+    /// Let an enrolled host cancel its UI owners after a nonempty poll and
+    /// before any incoming event can mutate Session. Empty polls do not invoke
+    /// the barrier. The closure runs synchronously and cannot retain the borrow.
+    pub fn live_poll_with_barrier(&mut self, before_apply: impl FnOnce(&mut Session)) -> bool {
         let Some(link) = self.live.link.as_mut() else { return false };
         let events = link.poll();
         if events.is_empty() {
             return false;
         }
+        before_apply(self);
         for (id, e) in events {
             self.live_event(id, e);
         }
@@ -1163,7 +1178,7 @@ impl Session {
                     ds.history.redo.clear();
                     ds.doc_mut().set_client_id(client.id());
                     if !was_dirty {
-                        ds.mark_saved();
+                        ds.mark_online_baseline();
                     }
                 }
                 // Edits made since hosting started go out with the first sync.
@@ -1180,7 +1195,7 @@ impl Session {
                     ds.history.undo.clear();
                     ds.history.redo.clear();
                     if !was_dirty {
-                        ds.mark_saved();
+                        ds.mark_online_baseline();
                     }
                 }
                 (uid, Some(doc))
@@ -1404,6 +1419,27 @@ impl Session {
     /// `mine` picks: a window calls it every frame it draws, after input, for the documents it
     /// holds.
     pub fn live_sync_in(&mut self, mine: impl Fn(Option<u64>) -> bool) {
+        self.live_sync_apply(mine);
+    }
+
+    /// Cancel host UI ownership before deferred incoming work or recovery can
+    /// apply at frame end. An idle sync does not interrupt a local pointer.
+    pub fn live_sync_in_with_barrier(&mut self, mine: impl Fn(Option<u64>) -> bool, before_apply: impl FnOnce(&mut Session)) {
+        let recovering = self.live.recovering.iter().any(|r| self.live.get(r.session).is_none_or(|l| l.syncing() || !l.status.active()));
+        let deferred = self.live.sessions.values().any(|l| {
+            l.status == Status::Live
+                && mine(l.doc_uid)
+                && !l.deferred.is_empty()
+                && l.syncing()
+                && l.doc_uid.is_some_and(|uid| self.docs.iter().find(|d| d.uid == uid).is_some_and(|d| !busy(d)))
+        });
+        if recovering || deferred {
+            before_apply(self);
+        }
+        self.live_sync_apply(mine);
+    }
+
+    fn live_sync_apply(&mut self, mine: impl Fn(Option<u64>) -> bool) {
         // A recovery copy whose session was left has its outcome too.
         if !self.live.recovering.is_empty() {
             self.online_recoveries();

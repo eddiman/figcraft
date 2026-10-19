@@ -15,7 +15,7 @@ use figcraft_engine::figcraft_collab::{Client, Limits, Outgoing, Server};
 use figcraft_engine::live::{Access, Event, HostOptions, LiveLink, Presence, PublishOptions, Published, Resume, Role, SessionInfo, Status};
 use serde_json::json;
 
-use crate::recovery::{Recovery, recover, recover_all};
+use crate::recovery::{Recovery, recover_all};
 
 const SERVER: &str = "wss://share.example/";
 const OWNER: &str = "OwnerSecretOwnerSecret";
@@ -154,14 +154,32 @@ fn shared() -> (Session, Shared, Server, u32) {
 fn crash(s: &Session, root: &Path) -> PathBuf {
     let mut r = Recovery::start(root).unwrap();
     r.write(s, true);
+    let mine = r.directory().to_path_buf();
     drop(r);
     let left = root.join("crashed");
-    std::fs::rename(root.join(std::process::id().to_string()), &left).unwrap();
+    std::fs::rename(mine, &left).unwrap();
     left
 }
 
+fn member(dir: &Path, uid: u64, ext: &str) -> PathBuf {
+    let slot = dir.join(uid.to_string());
+    let m: serde_json::Value = serde_json::from_slice(&std::fs::read(slot.join("current")).unwrap()).unwrap();
+    slot.join("generations").join(m["generation"].as_str().unwrap()).join(format!("snapshot.{ext}"))
+}
 fn copies(dir: &Path, ext: &str) -> usize {
-    std::fs::read_dir(dir).map_or(0, |d| d.flatten().filter(|f| f.path().extension().is_some_and(|e| e == ext)).count())
+    std::fs::read_dir(dir).map_or(0, |entries| {
+        entries
+            .flatten()
+            .filter(|entry| {
+                let Ok(bytes) = std::fs::read(entry.path().join("current")) else { return false };
+                let m: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                if ext == "online" && m["online"] != true {
+                    return false;
+                }
+                entry.path().join("generations").join(m["generation"].as_str().unwrap()).join(format!("snapshot.{ext}")).is_file()
+            })
+            .count()
+    })
 }
 
 /// The next run: only the preferences survive. Its copies of online files wait for their files.
@@ -191,7 +209,7 @@ fn a_copy_ahead_of_the_server_has_its_edits_applied_and_sent() {
     s.execute("shape.ellipse", &json!({"x": 30, "y": 0, "width": 10, "height": 10})).unwrap();
     script.lock().unwrap().sent.clear();
     let left = crash(&s, &root);
-    let note = std::fs::read_to_string(left.join(format!("{}.online", s.docs[0].uid))).unwrap();
+    let note = std::fs::read_to_string(member(&left, s.docs[0].uid, "online")).unwrap();
     let at = s.online_of(s.docs[0].uid).unwrap().2;
     assert_eq!(note, format!("{SERVER}\nf1\n{} {} {}", at.session, at.client_id, at.seq), "which file, who the app was, what it had");
     assert!(!note.contains(OWNER) && !note.contains("token="), "never a secret");
@@ -215,9 +233,10 @@ fn a_copy_ahead_of_the_server_has_its_edits_applied_and_sent() {
     assert_eq!(layers(server.document()), 2, "everyone gets the edit");
     assert_eq!(next.execute("collab.peers", &json!({})).unwrap()["status"], "live");
     // Only now the old copy goes, after this run has copied what it became.
+    r.write(&next, true);
     r.tick(&next, 1.0);
     assert!(!left.exists(), "the crashed run's folder is gone");
-    let mine = root.join(std::process::id().to_string());
+    let mine = r.directory().to_path_buf();
     assert_eq!((copies(&mine, "figcraft"), copies(&mine, "online")), (1, 1), "covered by this run's own copy");
     drop(r);
     let _ = std::fs::remove_dir_all(&root);
@@ -237,6 +256,7 @@ fn a_copy_the_server_already_has_is_discarded() {
     assert_eq!((next.docs.len(), layers(&next.docs[1].doc)), (2, 2), "the file as the server has it");
     assert!(script.lock().unwrap().sent.iter().all(|m| !matches!(m, ClientMsg::Changes { .. })), "nothing to send");
     assert!(!next.docs[1].is_dirty());
+    r.write(&next, true);
     r.tick(&next, 1.0);
     assert!(!left.exists());
     drop(r);
@@ -272,9 +292,10 @@ fn a_copy_that_cant_be_merged_opens_beside_the_file() {
         Some("Homepage changed on the server before your last changes reached it: they are open beside it as “Homepage (recovered copy)”")
     );
     assert!(script.lock().unwrap().sent.iter().all(|m| !matches!(m, ClientMsg::Changes { .. })), "nothing is forced onto the server");
+    r.write(&next, true);
     r.tick(&next, 1.0);
     assert!(!left.exists());
-    assert_eq!(copies(&root.join(std::process::id().to_string()), "figcraft"), 1, "the recovered tab has this run's copy");
+    assert_eq!(copies(r.directory(), "figcraft"), 1, "the recovered tab has this run's copy");
     drop(r);
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -296,9 +317,10 @@ fn a_copy_whose_server_cant_be_reached_opens_as_any_other() {
     assert_eq!(next.active, next.docs.len() - 1);
     assert!(next.message.take().unwrap_or_default().contains("your recovered copy is open"));
     assert_eq!(next.prefs.online_files.len(), 1, "the record stays: the file is still yours on the server");
+    r.write(&next, true);
     r.tick(&next, 1.0);
     assert!(!left.exists());
-    assert_eq!(copies(&root.join(std::process::id().to_string()), "figcraft"), 1);
+    assert_eq!(copies(r.directory(), "figcraft"), 1);
     drop(r);
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -329,10 +351,15 @@ fn without_its_record_the_copy_opens_as_any_other() {
     // The record was forgotten (or the preferences lost): the copy is what there is.
     let (mut next, script) = session();
     next.docs.clear();
-    assert_eq!(recover(&root, &mut next), 1);
+    let recovered = recover_all(&root, &mut next);
+    assert_eq!(recovered.copies, 1);
     assert!(script.lock().unwrap().joined.is_empty());
     assert!(next.docs.first().is_some_and(|d| d.is_dirty() && d.path.is_none()));
-    assert!(std::fs::read_dir(&root).unwrap().next().is_none(), "the folder is gone");
+    let mut replacement = Recovery::start(&root).unwrap();
+    replacement.adopt(recovered.waiting);
+    replacement.write(&next, true);
+    replacement.finish();
+    assert!(std::fs::read_dir(&root).unwrap().next().is_none(), "the replacement was written before cleanup");
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -342,7 +369,7 @@ fn the_note_follows_its_copy_and_goes_when_the_file_leaves_its_session() {
     let (mut s, _, _, _) = shared();
     let mut r = Recovery::start(&root).unwrap();
     r.write(&s, true);
-    let dir = root.join(std::process::id().to_string());
+    let dir = r.directory().to_path_buf();
     assert_eq!((copies(&dir, "figcraft"), copies(&dir, "online")), (1, 1));
     // Left: the copy is an ordinary one from the next write on.
     s.execute("collab.leave", &json!({})).unwrap();
@@ -352,4 +379,30 @@ fn the_note_follows_its_copy_and_goes_when_the_file_leaves_its_session() {
     r.finish();
     assert!(std::fs::read_dir(&root).unwrap().next().is_none());
     let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn ipad_recovery_retains_unconfirmed_copy() {
+    let root = root("unconfirmed-replacement");
+    let (mut s, script, mut server, _) = shared();
+    s.execute("shape.ellipse", &json!({"x":30,"y":0,"width":10,"height":10})).unwrap();
+    script.lock().unwrap().sent.clear();
+    let left = crash(&s, &root);
+    let (mut next, script, mut r, _) = restart(&s, &root);
+    r.write(&next, true);
+    assert!(left.exists(), "an unresolved online recovery keeps its source");
+    arrive(&mut next, &script, &mut server);
+    assert!(next.live().client().unwrap().pending() > 0, "recovered changes remain unconfirmed");
+    let slot = r.directory().join(next.ds().unwrap().uid.to_string());
+    let blocker = slot.join("current");
+    std::fs::create_dir_all(&blocker).unwrap();
+    r.write(&next, true);
+    assert!(left.exists(), "failed replacement cannot remove unconfirmed edits");
+    std::fs::remove_dir(&blocker).unwrap();
+    r.write(&next, true);
+    assert!(!left.exists(), "the complete replacement now owns recovery");
+    assert!(next.live().client().unwrap().pending() > 0, "checkpointing cannot acknowledge a server batch");
+    assert_eq!(copies(r.directory(), "online"), 1);
+    r.finish();
+    let _ = std::fs::remove_dir_all(root);
 }

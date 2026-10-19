@@ -13,6 +13,7 @@ fn text_of(s: &Session, id: NodeId) -> Result<TextData> {
 
 /// Start editing text node `id` with the caret at `caret` (None = select all).
 pub fn begin(s: &mut Session, id: NodeId, caret: Option<usize>, created: bool) -> Result<()> {
+    s.pointer_external_edit()?;
     let t = text_of(s, id)?;
     let n = t.char_count();
     s.begin_interaction("Edit text")?;
@@ -30,6 +31,7 @@ pub fn begin(s: &mut Session, id: NodeId, caret: Option<usize>, created: bool) -
 
 /// Finish editing: an empty new text layer is removed; the session becomes one undo step.
 pub fn end(s: &mut Session) -> Result<()> {
+    s.pointer_external_edit()?;
     let Some(te) = s.ds()?.text_edit.clone() else { return Ok(()) };
     s.ds_mut()?.text_edit = None;
     let empty = text_of(s, te.id).map(|t| t.characters.trim().is_empty()).unwrap_or(false);
@@ -82,6 +84,7 @@ fn edit(s: &mut Session, f: impl FnOnce(&mut TextData, &mut TextEdit)) -> Result
 /// Type (or paste) `text` replacing the selection. Line endings are normalised and other control
 /// characters dropped, so pasted plain text from any platform lands cleanly.
 pub fn insert(s: &mut Session, text: &str) -> Result<()> {
+    s.pointer_external_edit()?;
     let text: String = text
         .replace("\r\n", "\n")
         .replace(['\r', '\u{2028}', '\u{2029}'], "\n")
@@ -148,6 +151,7 @@ fn list_key(s: &mut Session, key: &str, shift: bool) -> Result<bool> {
 /// Cmd/Ctrl+] and Cmd/Ctrl+[ while editing: the selected list items a level deeper or out, like
 /// Tab and Shift+Tab. Returns whether anything changed (text that isn't a list stays as it is).
 pub fn list_indent(s: &mut Session, out: bool) -> Result<bool> {
+    s.pointer_external_edit()?;
     list_key(s, "Tab", out)
 }
 
@@ -213,6 +217,7 @@ fn word_right(chars: &[char], mut i: usize) -> usize {
 /// `word` moves or deletes by word, `line` to the line's ends (Up/Down, Home/End: the text's ends);
 /// [`crate::keymap::text_motion`] gives them for the platform's keys. `ArrowLeft` etc. also work.
 pub fn key(s: &mut Session, key: &str, shift: bool, word: bool, line: bool) -> Result<()> {
+    s.pointer_external_edit()?;
     let key = key.strip_prefix("Arrow").unwrap_or(key);
     let Some(te) = s.ds()?.text_edit.clone() else { return Err(EngineError::Other("not editing text".into())) };
     let t = text_of(s, te.id)?;
@@ -337,6 +342,7 @@ fn select(s: &mut Session, anchor: usize, caret: usize) -> Result<()> {
 /// [`insert`]; an empty `text` cancels it. Starting to compose over a selection deletes it, as
 /// typing would.
 pub fn preedit(s: &mut Session, text: &str, cursor: Option<usize>) -> Result<()> {
+    s.pointer_external_edit()?;
     let Some(te) = s.ds()?.text_edit.clone() else { return Err(EngineError::Other("not editing text".into())) };
     let text: String = text.chars().filter(|c| !c.is_control()).take(MAX_PREEDIT).collect();
     if text.is_empty() && te.preedit.is_none() {
@@ -394,12 +400,14 @@ fn line_end(chars: &[char], mut i: usize) -> usize {
 
 /// Place the caret (and optionally extend the selection) at char `index`.
 pub fn set_caret(s: &mut Session, index: usize, extend: bool) -> Result<()> {
+    s.pointer_external_edit()?;
     let Some(te) = s.ds()?.text_edit.clone() else { return Ok(()) };
     select(s, if extend { te.anchor } else { index }, index)
 }
 
 /// Select the word at `index` (double-click).
 pub fn select_word(s: &mut Session, index: usize) -> Result<()> {
+    s.pointer_external_edit()?;
     let Some(te) = s.ds()?.text_edit.clone() else { return Ok(()) };
     let chars: Vec<char> = text_of(s, te.id)?.characters.chars().collect();
     let mut a = index.min(chars.len());
@@ -428,6 +436,7 @@ pub fn select_word(s: &mut Session, index: usize) -> Result<()> {
 
 /// Select the line (paragraph) containing `index` (triple-click).
 pub fn select_line(s: &mut Session, index: usize) -> Result<()> {
+    s.pointer_external_edit()?;
     let Some(te) = s.ds()?.text_edit.clone() else { return Ok(()) };
     let chars: Vec<char> = text_of(s, te.id)?.characters.chars().collect();
     let i = index.min(chars.len());

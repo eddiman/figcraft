@@ -14,6 +14,10 @@ use crate::{FigApp, TitleBar};
 pub const HEIGHT: f32 = 40.0;
 
 pub fn tab_bar(app: &mut FigApp, ui: &mut Ui) {
+    if app.ui.adaptive.enabled {
+        touch_tab_bar(app, ui);
+        return;
+    }
     let t = Tokens::get(ui.ctx());
     egui::Panel::top("tab_bar").exact_size(HEIGHT).frame(egui::Frame::NONE.fill(t.tab_bar)).show(ui, |ui| {
         let rect = ui.max_rect();
@@ -42,6 +46,7 @@ pub fn tab_bar(app: &mut FigApp, ui: &mut Ui) {
         }
         icons::paint(ui.painter(), Rect::from_center_size(hr.center(), vec2(16.0, 16.0)), Icon::Home, t.icon);
         if hresp.clicked() {
+            app.cancel_canvas_pointer();
             app.ui.home = true;
         }
         x += 44.0;
@@ -53,12 +58,13 @@ pub fn tab_bar(app: &mut FigApp, ui: &mut Ui) {
         let several = !ui.ctx().embed_viewports();
         for (i, d) in app.session.docs.iter().enumerate().filter(|(_, d)| app.shows(d.uid)) {
             let active = i == app.session.active && !app.ui.home;
-            let name = d.doc.name.clone();
+            let saving = app.owned_save_pending(d.branch_of.as_ref().map_or(d.uid, |(uid, _)| *uid));
+            let name = if saving { trf("{name} (Saving...)", &[("name", &d.doc.name)]) } else { d.doc.name.clone() };
             // In a live session: a mark after the name says whether others get in.
             let live = live_mark(app, d.uid);
             let mark_w = if live.is_some() { 18.0 } else { 0.0 };
             // (A file in a session is rarely saved here: its unsaved dot gets room beside the mark.)
-            let dirty = d.is_dirty();
+            let dirty = if d.branch_of.is_some() { d.is_dirty() } else { app.session.file_is_dirty(d.uid) };
             let dot_w = if dirty && live.is_some() { 12.0 } else { 0.0 };
             let w = (regular(12.0).size * 0.6 * name.chars().count() as f32 + 64.0 + mark_w + dot_w).clamp(120.0, 220.0);
             let r = Rect::from_min_size(pos2(x, rect.min.y), vec2(w, HEIGHT));
@@ -83,7 +89,7 @@ pub fn tab_bar(app: &mut FigApp, ui: &mut Ui) {
                 Some(false) => trf("{name}, online, open only to you", &[("name", &name)]),
                 None => name.clone(),
             };
-            let resp = if live.is_some() { resp.on_hover_text(&label) } else { resp };
+            let resp = if live.is_some() || saving { resp.on_hover_text(&label) } else { resp };
             crate::a11y::tab(&resp, &label, active);
             if active {
                 ui.painter().rect_filled(r, CornerRadius::ZERO, t.tab_active);
@@ -167,7 +173,7 @@ pub fn tab_bar(app: &mut FigApp, ui: &mut Ui) {
         }
         if let Some(i) = close {
             // A branch tab's edits live on in its main file: closing it loses nothing.
-            let dirty = app.session.docs.get(i).is_some_and(|d| d.is_dirty() && d.branch_of.is_none());
+            let dirty = app.session.docs.get(i).is_some_and(|d| app.session.file_is_dirty(d.uid) && d.branch_of.is_none());
             if dirty {
                 app.ui.find = None;
                 app.toast(trf(
@@ -183,6 +189,67 @@ pub fn tab_bar(app: &mut FigApp, ui: &mut Ui) {
         }
         let _ = Color32::TRANSPARENT;
         let _ = Align2::LEFT_TOP;
+    });
+}
+
+fn touch_tab_bar(app: &mut FigApp, ui: &mut Ui) {
+    let t = Tokens::get(ui.ctx());
+    egui::Panel::top("touch_tabs").exact_size(44.0).frame(egui::Frame::NONE.fill(t.tab_bar)).show(ui, |ui| {
+        ui.horizontal(|ui| {
+            if crate::adaptive::button(app, ui, "home", tr("Home"), app.ui.home) {
+                app.cancel_canvas_pointer();
+                app.ui.home = true;
+            }
+            let name = app
+                .session
+                .ds()
+                .map(|ds| {
+                    let suffix = if app.owned_save_pending(ds.uid) {
+                        tr("Saving...")
+                    } else if app.session.file_is_dirty(ds.uid) {
+                        "*"
+                    } else {
+                        ""
+                    };
+                    crate::widgets::elide(ui, &format!("{} {suffix}", ds.doc.name), 120.0)
+                })
+                .unwrap_or_else(|_| tr("Files").to_string());
+            ui.menu_button(name, |ui| {
+                let docs: Vec<_> =
+                    app.session.docs.iter().enumerate().filter(|(_, d)| app.shows(d.uid)).map(|(i, d)| (i, d.doc.name.clone())).collect();
+                egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                    for (index, name) in docs {
+                        if ui.add_sized([ui.available_width().max(160.0), 44.0], egui::Button::new(name)).clicked() {
+                            app.run("doc.switch", json!({"index": index}));
+                            app.ui.home = false;
+                            ui.close();
+                        }
+                    }
+                });
+            });
+            if crate::adaptive::button(app, ui, "new", tr("New design file"), false) {
+                app.run("file.new", json!({}));
+                app.ui.home = false;
+            }
+            if crate::adaptive::button(app, ui, "close_tab", tr("Close tab"), false) {
+                let dirty = app.session.ds().is_ok_and(|d| d.branch_of.is_none() && app.session.file_is_dirty(d.uid));
+                if dirty {
+                    app.toast(tr("Unsaved changes: save before closing this tab."));
+                } else {
+                    app.run("file.close", json!({"index": app.session.active}));
+                }
+            }
+            ui.menu_button(tr("More"), |ui| {
+                if ui.add_sized([180.0, 44.0], egui::Button::new(tr("Close without saving"))).clicked() {
+                    app.run("file.close", json!({"index": app.session.active, "force": true}));
+                    ui.close();
+                }
+                if ui.add_sized([180.0, 44.0], egui::Button::new(tr("Save as"))).clicked() {
+                    app.run("file.saveAs", json!({}));
+                    ui.close();
+                }
+            });
+        });
     });
 }
 

@@ -1,0 +1,36 @@
+# Native iPad services
+
+This private bridge is a separate Rust workspace so its reviewed UIKit interop stays outside the shared workspace's unsafe-code prohibition. D07 in the local iPad execution plan records the picker exception. D11 records the separate lifecycle exception. Only src/native.rs and src/lifecycle_native.rs allow unsafe code; src/callback.rs and src/lifecycle.rs contain portable panic-containment and lease-ownership tests. The crate creates no event loop or renderer.
+
+Host must be created and used on the main thread. Requests contain owned paths and values. A request's resource owner survives native presentation and dismissal, including Host destruction during presentation. Poll results on the UI thread; callbacks send messages and request repaint without accessing editor state. The app adapter promotes successful imports before delivering their paths and retains captured exports through native termination.
+
+Imports and exports use the system picker's copy mode. Imports coordinate the read and balance security-scoped access. Unknown extension types fall back to public.data and are checked after selection. Folder export preserves relative paths. Provider failures that keep the picker visible remain pending until the system UI resolves them or the user cancels. Native Save As is outside this API.
+
+Run packaging/ipad/check-bridge.sh simulator and packaging/ipad/check-bridge.sh device from the repository root with DEVELOPER_DIR pointing to Xcode. These check bridge formatting, portable callback tests and target-specific Clippy because root host CI excludes this workspace. The app's portable file and recovery coordinator tests remain in root CI.
+
+Simulator evidence does not qualify physical lifecycle or third-party providers. Coordinated imports currently copy synchronously on the main thread; large-file responsiveness requires measurement before qualification.
+
+## Recovery lifecycle (T11)
+
+LifecycleHost retains main-thread notification observers, a polling timer and one bounded UIKit background task. The safe lifecycle module defines checkpoint requests, progress and terminal events. WillResignActive and DidEnterBackground start checkpoint capture and polling with a fixed five-second deadline. DidBecomeActive ends the current lease and requests foreground work. WillTerminate requests a nonblocking best-effort checkpoint. eframe/winit continue to own the event loop and graphics lifecycle.
+
+Native blocks capture numeric owner and cycle IDs. Expiration ends the native lease immediately, including during a reentrant Rust callback; completion notices wait until the active callback returns. Host destruction removes observers, invalidates the timer and ends the remaining task. Workers and completed recovery files remain owned by the shared recovery package after a deadline or host drop. This does not guarantee another callback or a completed write before process termination.
+
+## Keyboard geometry (T19)
+
+`keyboard_bounds()` is a synchronous main-thread value query for the
+foreground key window's root-view `UIKeyboardLayoutGuide`. It enables undocked
+tracking and disables `usesBottomSafeArea` at the existing iOS 17 deployment
+floor, converts the layout frame into window points and returns finite owned
+numeric bounds. A nonpositive guide is `None`; missing foreground geometry is
+an explicit error. Callers must convert window points to their UI coordinate
+scale and must not treat errors as a hidden keyboard.
+
+`src/geometry.rs` uses safe typed UIKit methods and has no unsafe-code exception,
+retained native state, callback or event-loop ownership. The UIKit features
+explicitly include `objc2-core-foundation` so isolated bridge checks do not rely
+on feature unification with the app. T19's isolated native simulator checks
+confirm visible docked-keyboard avoidance in portrait and landscape after
+restoring simulator rotation/software-keyboard operation. Compilation and
+supplied-geometry screenshots alone are not native keyboard evidence.
+Physical-device and floating/split keyboard qualification remain deferred.

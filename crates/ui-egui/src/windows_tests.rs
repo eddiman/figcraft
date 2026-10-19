@@ -64,3 +64,14 @@ fn windows_hold_tabs_and_close_with_their_files() {
     assert!(!app.ui.quit, "the app keeps running");
     assert_eq!(app.session.ds().unwrap().doc.name, "A");
 }
+
+#[test]
+fn ipad_guard_reports_success_only_when_callback_completes() {
+    let ctx = egui::Context::default();
+    let mut app = FigApp::new(Session::new(), Box::new(NoServices));
+    let mut completed_work = false;
+    assert!(crate::windows::guard(&mut app, &ctx, |_| completed_work = true));
+    assert!(completed_work);
+    assert!(!crate::windows::guard(&mut app, &ctx, |_| panic!("synthetic guarded callback panic")));
+    assert!(crate::windows::guard(&mut app, &ctx, |_| {}));
+}

@@ -715,7 +715,7 @@ fn start_ui(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
     } else {
         online_note(app, ui, t, &server);
     }
-    if widgets::button(ui, tr("Start sharing"), true, true).clicked() {
+    if widgets::button(ui, tr("Start sharing"), true, !local || app.services.capabilities().local_session_hosting).clicked() {
         let mut params = json!({"via": if local { "local" } else { "online" }});
         if local && app.ui.live.this_computer {
             params["bind"] = json!("local");

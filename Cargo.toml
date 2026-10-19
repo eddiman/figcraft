@@ -2,7 +2,7 @@
 resolver = "3"
 members = ["crates/*", "apps/*", "xtask"]
 # The plugin SDK and examples build for wasm32 in a workspace of their own (`cargo xtask plugins`).
-exclude = ["plugins"]
+exclude = ["plugins", "platform/apple-ipad", "platform/apple-ipad-clipboard", "maintenance/ipad-deps/egui", "maintenance/ipad-deps/egui-winit", "maintenance/ipad-deps/eframe", "maintenance/ipad-deps/winit"]
 # default-members = ["crates/*", "apps/figcraft", "apps/figcraft-cli", "xtask"]
 
 [workspace.package]
@@ -27,6 +27,7 @@ figcraft-format = { path = "crates/format" }
 figcraft-tools = { path = "crates/tools" }
 figcraft-collab = { path = "crates/collab" }
 figcraft-engine = { path = "crates/engine" }
+figcraft-recovery = { path = "crates/recovery" }
 figcraft-ui-egui = { path = "crates/ui-egui" }
 figcraft-mcp = { path = "crates/mcp" }
 figcraft-collab-net = { path = "crates/collab-net" }
@@ -116,3 +117,9 @@ codegen-units = 1
 debug = false
 strip = true
 panic = "abort"
+
+[patch.crates-io]
+egui = { path = "maintenance/ipad-deps/egui" }
+egui-winit = { path = "maintenance/ipad-deps/egui-winit" }
+eframe = { path = "maintenance/ipad-deps/eframe" }
+winit = { path = "maintenance/ipad-deps/winit" }

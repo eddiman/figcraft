@@ -572,7 +572,13 @@ pub fn section(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
                 app.ui.home = false;
             }
         }
-        Some(Action::Reveal(path)) => app.services.reveal_path(Path::new(&path)),
+        Some(Action::Reveal(path)) => {
+            if app.services.capabilities().reveal_file {
+                app.services.reveal_path(Path::new(&path));
+            } else {
+                app.platform_error("Revealing files is unsupported on this platform");
+            }
+        }
         Some(Action::Remove(path)) => {
             app.run("file.openRecent", json!({"remove": path}));
             app.services.save_prefs(&app.session.prefs);

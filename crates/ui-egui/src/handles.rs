@@ -60,6 +60,11 @@ fn crop_corners(app: &FigApp, id: NodeId, r: (f64, f64, f64, f64)) -> Option<[Po
     ])
 }
 
+/// Remove the owner before a reset/release can reach the commit branch.
+pub(crate) fn cancel_pointer(ctx: &egui::Context) {
+    ctx.data_mut(|data| data.remove::<Drag>(drag_id()));
+}
+
 fn drag_id() -> Id {
     Id::new("figcraft_handle_drag")
 }
@@ -116,7 +121,7 @@ fn set_gradient(app: &mut FigApp, id: NodeId, fills: bool, index: usize, g: figc
     let Some(mut paint) = list.get(index).cloned() else { return };
     paint.kind = PaintKind::Gradient(g);
     let cmd = if fills { "fill.set" } else { "stroke.set" };
-    let _ = app.session.execute(cmd, &json!({"ids": [id], "index": index, "paint": paint}));
+    let _ = app.pointer_session(|session| session.execute(cmd, &json!({"ids": [id], "index": index, "paint": paint})));
 }
 
 /// Delete/Backspace while a gradient is open: remove its selected stop (two always stay).
@@ -128,9 +133,9 @@ pub fn remove_selected_stop(app: &mut FigApp, ctx: &egui::Context) -> bool {
     }
     g.stops.remove(sel);
     ctx.data_mut(|d| d.insert_temp(crate::colorpicker::stop_id(), sel.saturating_sub(1)));
-    let _ = app.session.begin_interaction("Remove gradient stop");
+    let _ = app.pointer_session(|session| session.begin_interaction("Remove gradient stop"));
     set_gradient(app, id, fills, index, g);
-    let _ = app.session.commit_interaction();
+    let _ = app.pointer_session(|session| session.commit_interaction());
     true
 }
 
@@ -367,14 +372,13 @@ pub fn draw(app: &FigApp, painter: &egui::Painter) {
 
 /// Pointer handling; returns true when a handle owns the pointer this frame.
 pub fn input(app: &mut FigApp, ctx: &egui::Context, pos: Pos2) -> bool {
-    let (pressed, down, released, shift) = ctx.input(|i| {
-        (
-            i.pointer.button_pressed(egui::PointerButton::Primary),
-            i.pointer.primary_down(),
-            i.pointer.button_released(egui::PointerButton::Primary),
-            i.modifiers.shift,
-        )
-    });
+    input_value(app, ctx, crate::canvas::PointerInput::from_context(ctx, Some(pos), true))
+}
+
+pub(crate) fn input_value(app: &mut FigApp, ctx: &egui::Context, input: crate::canvas::PointerInput) -> bool {
+    app.canvas_pointer_preflight(ctx);
+    let Some(pos) = input.pos else { return false };
+    let (pressed, down, released, shift) = (input.pressed, input.down, input.released, input.modifiers.shift);
     let dragging: Option<Drag> = ctx.data(|d| d.get_temp(drag_id()));
     if let Some(drag) = dragging {
         if down {
@@ -382,7 +386,7 @@ pub fn input(app: &mut FigApp, ctx: &egui::Context, pos: Pos2) -> bool {
             ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
         }
         if released || !down {
-            let _ = app.session.commit_interaction();
+            let _ = app.pointer_session(|session| session.commit_interaction());
             ctx.data_mut(|d| d.remove::<Drag>(drag_id()));
         }
         return true;
@@ -399,7 +403,7 @@ pub fn input(app: &mut FigApp, ctx: &egui::Context, pos: Pos2) -> bool {
             {
                 ctx.set_cursor_icon(egui::CursorIcon::Grab);
                 if pressed {
-                    let _ = app.session.begin_interaction("Edit gradient");
+                    let _ = app.pointer_session(|session| session.begin_interaction("Edit gradient"));
                     ctx.data_mut(|d| d.insert_temp(drag_id(), Drag::Gradient { id, fills, index, which }));
                 }
                 return true;
@@ -417,14 +421,14 @@ pub fn input(app: &mut FigApp, ctx: &egui::Context, pos: Pos2) -> bool {
         if pressed {
             let stop = match stop_hit {
                 Some(i) => {
-                    let _ = app.session.begin_interaction("Edit gradient");
+                    let _ = app.pointer_session(|session| session.begin_interaction("Edit gradient"));
                     i
                 }
                 None => {
                     let pos01 = t.map(|(t, _)| t).unwrap_or(0.5) as f32;
                     let mut g2 = g.clone();
                     g2.stops.push(figcraft_color::ColorStop { position: pos01, color: g.sample(pos01) });
-                    let _ = app.session.begin_interaction("Add gradient stop");
+                    let _ = app.pointer_session(|session| session.begin_interaction("Add gradient stop"));
                     set_gradient(app, id, fills, index, g2);
                     g.stops.len()
                 }
@@ -439,7 +443,7 @@ pub fn input(app: &mut FigApp, ctx: &egui::Context, pos: Pos2) -> bool {
         if let Some(which) = hit {
             ctx.set_cursor_icon(egui::CursorIcon::Grab);
             if pressed {
-                let _ = app.session.begin_interaction("Edit progressive blur");
+                let _ = app.pointer_session(|session| session.begin_interaction("Edit progressive blur"));
                 ctx.data_mut(|d| d.insert_temp(drag_id(), Drag::Blur { id, index, which }));
             }
             return true;
@@ -463,7 +467,7 @@ pub fn input(app: &mut FigApp, ctx: &egui::Context, pos: Pos2) -> bool {
             egui::CursorIcon::ResizeNeSw
         });
         if pressed {
-            let _ = app.session.begin_interaction("Crop image");
+            let _ = app.pointer_session(|session| session.begin_interaction("Crop image"));
             ctx.data_mut(|d| d.insert_temp(drag_id(), Drag::Crop { id, fills, index, which, start, rect }));
         }
         return true;
@@ -476,7 +480,7 @@ pub fn input(app: &mut FigApp, ctx: &egui::Context, pos: Pos2) -> bool {
         if r.contains(pos) {
             ctx.set_cursor_icon(if side % 2 == 0 { egui::CursorIcon::ResizeVertical } else { egui::CursorIcon::ResizeHorizontal });
             if pressed {
-                let _ = app.session.begin_interaction("Padding");
+                let _ = app.pointer_session(|session| session.begin_interaction("Padding"));
                 ctx.data_mut(|d| d.insert_temp(drag_id(), Drag::Padding { id, side, start: pos, value: v }));
                 return true;
             }
@@ -487,7 +491,7 @@ pub fn input(app: &mut FigApp, ctx: &egui::Context, pos: Pos2) -> bool {
         if g.rect.contains(pos) {
             ctx.set_cursor_icon(if g.vertical { egui::CursorIcon::ResizeVertical } else { egui::CursorIcon::ResizeHorizontal });
             if pressed {
-                let _ = app.session.begin_interaction("Gap");
+                let _ = app.pointer_session(|session| session.begin_interaction("Gap"));
                 ctx.data_mut(|d| d.insert_temp(drag_id(), Drag::Gap { id, start: pos, value: g.value, vertical: g.vertical, key: g.key }));
                 return true;
             }
@@ -523,7 +527,7 @@ fn apply(app: &mut FigApp, drag: &Drag, pos: Pos2, shift: bool) {
                 }
             }
             let cmd = if *fills { "fill.set" } else { "stroke.set" };
-            let _ = app.session.execute(cmd, &json!({"ids": [id], "index": index, "paint": paint}));
+            let _ = app.pointer_session(|session| session.execute(cmd, &json!({"ids": [id], "index": index, "paint": paint})));
             let _: Option<Paint> = None;
         }
         Drag::Blur { id, index, which } => {
@@ -536,7 +540,7 @@ fn apply(app: &mut FigApp, drag: &Drag, pos: Pos2, shift: bool) {
                     b.end = u;
                 }
             }
-            let _ = app.session.execute("effect.set", &json!({"ids": [id], "index": index, "effect": e}));
+            let _ = app.pointer_session(|session| session.execute("effect.set", &json!({"ids": [id], "index": index, "effect": e})));
         }
         Drag::Padding { id, side, start, value } => {
             let d = f64::from(match side {
@@ -550,7 +554,7 @@ fn apply(app: &mut FigApp, drag: &Drag, pos: Pos2, shift: bool) {
             // Shift drags both sides of the axis together.
             let props =
                 if shift { if side % 2 == 0 { json!({"paddingVertical": v}) } else { json!({"paddingHorizontal": v}) } } else { json!({ key: v }) };
-            let _ = app.session.execute("node.set", &json!({"ids": [id], "props": props}));
+            let _ = app.pointer_session(|session| session.execute("node.set", &json!({"ids": [id], "props": props})));
         }
         Drag::Crop { id, fills, index, which, start, rect } => {
             let Some(u) = screen_to_unit(app, *id, pos) else { return };
@@ -584,7 +588,7 @@ fn apply(app: &mut FigApp, drag: &Drag, pos: Pos2, shift: bool) {
                 img.crop = Some(ImagePaint::crop_from_rect(r.0, r.1, r.2, r.3));
             }
             let cmd = if *fills { "fill.set" } else { "stroke.set" };
-            let _ = app.session.execute(cmd, &json!({"ids": [id], "index": index, "paint": paint}));
+            let _ = app.pointer_session(|session| session.execute(cmd, &json!({"ids": [id], "index": index, "paint": paint})));
         }
         Drag::Gap { id, start, value, vertical, key } => {
             let d = f64::from(if *vertical { pos.y - start.y } else { pos.x - start.x }) / zoom;
@@ -596,7 +600,74 @@ fn apply(app: &mut FigApp, drag: &Drag, pos: Pos2, shift: bool) {
                 ("gap", Some(l)) if l.main_align.is_auto_gap() && l.mode != LayoutMode::Grid => props["mainAlign"] = json!("min"),
                 _ => {}
             }
-            let _ = app.session.execute("node.set", &json!({"ids": [id], "props": props}));
+            let _ = app.pointer_session(|session| session.execute("node.set", &json!({"ids": [id], "props": props})));
+        }
+    }
+}
+
+#[cfg(test)]
+mod pointer_cancel_tests {
+    use super::*;
+    use crate::canvas_pointer::tests::{cancel_and_release, preview_fixture};
+    #[test]
+    fn ipad_ui_pointer_all_handle_owners_are_removed_before_reset_up() {
+        for kind in 0..5 {
+            let (a, ctx, id) = preview_fixture();
+            let drag = match kind {
+                0 => Drag::Gradient { id, fills: true, index: 0, which: 1 },
+                1 => Drag::Padding { id, side: 0, start: Pos2::ZERO, value: 10.0 },
+                2 => Drag::Gap { id, start: Pos2::ZERO, value: 10.0, vertical: true, key: "gap" },
+                3 => Drag::Blur { id, index: 0, which: 1 },
+                _ => Drag::Crop { id, fills: true, index: 0, which: 4, start: (0.0, 0.0), rect: (0.0, 0.0, 1.0, 1.0) },
+            };
+            ctx.data_mut(|data| data.insert_temp(drag_id(), drag));
+            cancel_and_release(a, ctx, |a, ui| {
+                assert!(ui.ctx().data(|data| data.get_temp::<Drag>(drag_id())).is_none());
+                input(a, ui.ctx(), pos2(400.0, 300.0));
+            });
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod native_fixture {
+    use super::*;
+    pub(crate) fn owner(ctx: &egui::Context) -> Option<&'static str> {
+        ctx.data(|d| d.get_temp::<Drag>(drag_id())).map(|drag| match drag {
+            Drag::Gradient { .. } => "gradient",
+            Drag::Blur { .. } => "blur",
+            Drag::Crop { .. } => "crop",
+            Drag::Padding { .. } => "padding",
+            Drag::Gap { .. } => "gap",
+        })
+    }
+    pub(crate) fn gradient(app: &FigApp, which: usize) -> Option<Pos2> {
+        let (id, _, _, g) = gradient_target(app)?;
+        match which {
+            0 => {
+                let a = unit_to_screen(app, id, g.from)?;
+                let b = unit_to_screen(app, id, g.to)?;
+                Some(a + (b - a) * g.stops.get(1)?.position)
+            }
+            1 => unit_to_screen(app, id, g.to),
+            _ => unit_to_screen(app, id, g.width),
+        }
+    }
+    pub(crate) fn crop(app: &FigApp, corner: bool) -> Option<Pos2> {
+        let (id, _, _, _, rect) = crop_target(app)?;
+        let corners = crop_corners(app, id, rect)?;
+        Some(if corner { corners[0] } else { corners[0] + (corners[2] - corners[0]) * 0.5 })
+    }
+    pub(crate) fn blur(app: &FigApp, ctx: &egui::Context, which: usize) -> Option<Pos2> {
+        let (id, _, effect) = blur_target(app, ctx)?;
+        blur_points(app, id, &effect)?.get(which).copied()
+    }
+    pub(crate) fn layout(app: &FigApp, padding: bool, cross: bool) -> Option<Pos2> {
+        let z = al_zones(app)?;
+        if padding {
+            z.bands.first().map(|(_, r, _)| r.center())
+        } else {
+            z.gaps.iter().find(|g| g.key == if cross { "crossGap" } else { "gap" }).map(|g| g.rect.center())
         }
     }
 }

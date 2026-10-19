@@ -21,6 +21,11 @@ struct Drag {
     pos: Pos2,
 }
 
+/// Remove the owner before a reset/release can reach the commit branch.
+pub(crate) fn cancel_pointer(ctx: &egui::Context) {
+    ctx.data_mut(|data| data.remove::<Drag>(drag_id()));
+}
+
 fn drag_id() -> Id {
     Id::new("proto_canvas_drag")
 }
@@ -211,7 +216,12 @@ pub fn draw(app: &FigApp, painter: &egui::Painter) {
 /// Canvas input while the Prototype tab is open. Returns true when it consumed the gesture
 /// (dragging from a connection handle, or clicking a noodle).
 pub fn input(app: &mut FigApp, ui: &egui::Ui, resp: &egui::Response) -> bool {
-    let ctx = ui.ctx().clone();
+    let ctx = ui.ctx();
+    input_value(app, ctx, crate::canvas::PointerInput::from_context(ctx, ctx.input(|i| i.pointer.hover_pos()), resp.hovered()))
+}
+
+pub(crate) fn input_value(app: &mut FigApp, ctx: &egui::Context, input: crate::canvas::PointerInput) -> bool {
+    app.canvas_pointer_preflight(ctx);
     let drag: Option<Drag> = ctx.data(|d| d.get_temp(drag_id()));
     if !active(app) {
         if drag.is_some() {
@@ -219,14 +229,7 @@ pub fn input(app: &mut FigApp, ui: &egui::Ui, resp: &egui::Response) -> bool {
         }
         return false;
     }
-    let (pos, pressed, down, released) = ctx.input(|i| {
-        (
-            i.pointer.hover_pos(),
-            i.pointer.button_pressed(egui::PointerButton::Primary),
-            i.pointer.primary_down(),
-            i.pointer.button_released(egui::PointerButton::Primary),
-        )
-    });
+    let (pos, pressed, down, released) = (input.pos, input.pressed, input.down, input.released);
     let Ok(ds) = app.session.ds() else { return false };
     let (doc, page, sel) = (ds.doc.clone(), ds.page, ds.selection.clone());
     if let Some(mut d) = drag {
@@ -238,10 +241,10 @@ pub fn input(app: &mut FigApp, ui: &egui::Ui, resp: &egui::Response) -> bool {
             ctx.data_mut(|m| m.remove::<Drag>(drag_id()));
             if let Some(dest) = frame_at(app, &doc, page, d.pos)
                 && doc.top_level_frame(d.source) != Some(dest)
-                && let Some(r) = app.run("proto.interaction.add", json!({"ids": [d.source], "dest": dest}))
+                && let Some(r) = app.pointer_command("proto.interaction.add", json!({"ids": [d.source], "dest": dest}))
             {
                 let k = r.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
-                crate::proto_panel::open_editor(&ctx, Some((d.source, k)));
+                crate::proto_panel::open_editor(ctx, Some((d.source, k)));
             }
         } else {
             ctx.data_mut(|m| m.insert_temp(drag_id(), d));
@@ -249,7 +252,7 @@ pub fn input(app: &mut FigApp, ui: &egui::Ui, resp: &egui::Response) -> bool {
         return true;
     }
     let Some(pos) = pos.filter(|p| app.canvas.rect.contains(*p)) else { return false };
-    if !resp.hovered() || ds.text_edit.is_some() {
+    if !input.hovered || ds.text_edit.is_some() {
         return false;
     }
     let over_handle = handles(app, &doc, &sel).into_iter().find(|(_, c)| c.distance(pos) <= HANDLE_R + 3.0);
@@ -263,13 +266,16 @@ pub fn input(app: &mut FigApp, ui: &egui::Ui, resp: &egui::Response) -> bool {
         ctx.data_mut(|m| m.insert_temp(drag_id(), Drag { source, from, pos }));
         return true;
     }
-    let hit = noodles(app, &ctx, &doc, page)
+    let hit = noodles(app, ctx, &doc, page)
         .into_iter()
         .filter(|n| bezier_distance(&n.pts, pos) < 5.0)
         .min_by(|a, b| bezier_distance(&a.pts, pos).total_cmp(&bezier_distance(&b.pts, pos)));
     if let Some(n) = hit {
-        app.session.set_selection(vec![n.source]);
-        crate::proto_panel::open_editor(&ctx, Some((n.source, n.index)));
+        let _ = app.pointer_session(|session| {
+            session.set_selection(vec![n.source]);
+            Ok(())
+        });
+        crate::proto_panel::open_editor(ctx, Some((n.source, n.index)));
         return true;
     }
     false
@@ -291,5 +297,103 @@ mod tests {
         assert_eq!(back[3], pos2(50.0, 10.0));
         assert!(bezier_distance(&c, bezier(&c, 0.5)) < 0.5);
         assert!(bezier_distance(&c, pos2(0.0, 300.0)) > 50.0);
+    }
+}
+
+#[cfg(test)]
+mod pointer_cancel_tests {
+    use super::*;
+    use crate::canvas_pointer::tests::{cancel_and_release, preview_fixture};
+    #[test]
+    fn ipad_ui_panic_clears_unenrolled_prototype_owner_before_recovery() {
+        struct Probe(egui::Context, std::rc::Rc<std::cell::Cell<bool>>);
+        impl crate::Services for Probe {
+            fn emergency_save(&mut self, _: &figcraft_engine::Session) {
+                assert!(self.0.data(|data| data.get_temp::<Drag>(drag_id())).is_none());
+                self.1.set(true);
+            }
+        }
+        let (mut app, ctx, id) = preview_fixture();
+        assert!(app.canvas_pointer.is_none());
+        ctx.data_mut(|data| data.insert_temp(drag_id(), Drag { source: id, from: Pos2::ZERO, pos: pos2(400.0, 300.0) }));
+        let saved = std::rc::Rc::new(std::cell::Cell::new(false));
+        app.services = Box::new(Probe(ctx.clone(), saved.clone()));
+        assert!(!crate::windows::guard(&mut app, &ctx, |_| panic!("synthetic panic with an unenrolled prototype owner")));
+        assert!(saved.get());
+    }
+    #[test]
+    fn ipad_ui_pointer_prototype_owner_cannot_add_connection_after_reset_up() {
+        let (mut a, ctx, id) = preview_fixture();
+        a.ui.right_tab = RightTab::Prototype;
+        ctx.data_mut(|data| data.insert_temp(drag_id(), Drag { source: id, from: Pos2::ZERO, pos: pos2(400.0, 300.0) }));
+        cancel_and_release(a, ctx, |a, ui| {
+            assert!(ui.ctx().data(|data| data.get_temp::<Drag>(drag_id())).is_none());
+            let resp = ui.interact(a.canvas.rect, ui.id().with("canvas"), egui::Sense::click_and_drag());
+            input(a, ui, &resp);
+        });
+    }
+}
+
+#[cfg(test)]
+mod value_input_tests {
+    use super::*;
+    use crate::layers_drag_tests::Ui;
+    use figcraft_engine::{Session, tools::PointerKind};
+    #[test]
+    fn ipad_touch_prototype_value_drag_waits_for_its_explicit_up() {
+        let mut session = Session::new();
+        session.execute("shape.rectangle", &json!({"x":100,"y":100,"width":100,"height":100})).unwrap();
+        let mut u = Ui::new(session);
+        u.app.ui.right_tab = RightTab::Prototype;
+        let ds = u.app.session.ds().unwrap();
+        let doc = ds.doc.clone();
+        let selection = ds.selection.clone();
+        let (_, from) = handles(&u.app, &doc, &selection).first().copied().unwrap();
+        let field = egui::Id::new("value prototype previous field");
+        u.ctx.memory_mut(|memory| memory.request_focus(field));
+        u.app.begin_canvas_pointer(&u.ctx).unwrap();
+        crate::canvas::pointer_value(&mut u.app, &u.ctx, PointerKind::Down, from, egui::Modifiers::NONE, None).unwrap();
+        assert!(u.ctx.data(|d| d.get_temp::<Drag>(drag_id())).is_some());
+        u.frame(vec![]);
+        assert!(u.ctx.data(|d| d.get_temp::<Drag>(drag_id())).is_some(), "no legacy !down release may finish a value-owned drag");
+        crate::canvas::pointer_value(&mut u.app, &u.ctx, PointerKind::Up, from, egui::Modifiers::NONE, None).unwrap();
+        u.app.finish_canvas_pointer().unwrap();
+        assert!(u.ctx.data(|d| d.get_temp::<Drag>(drag_id())).is_none());
+    }
+    #[test]
+    fn ipad_native_unavailable_removes_prototype_before_forwarded_reset_up() {
+        let mut session = Session::new();
+        session.execute("shape.rectangle", &json!({"x":100,"y":100,"width":100,"height":100})).unwrap();
+        let mut u = Ui::new(session);
+        u.app.ui.right_tab = RightTab::Prototype;
+        let before = u.app.session.ds().unwrap().doc.clone();
+        let selection = u.app.session.selection();
+        let (_, from) = handles(&u.app, &before, &selection).first().copied().unwrap();
+        let mut native = crate::touch_native::Native::default();
+        crate::touch_native::Native::enable(&mut u.app);
+        native.finish_frame(&u.app, &u.ctx, true);
+        u.app.begin_canvas_pointer(&u.ctx).unwrap();
+        crate::canvas::pointer_value(&mut u.app, &u.ctx, PointerKind::Down, from, egui::Modifiers::NONE, None).unwrap();
+        assert!(u.ctx.data(|data| data.get_temp::<Drag>(drag_id())).is_some());
+        let panel = Pos2::ZERO;
+        let button =
+            |pressed| egui::Event::PointerButton { pos: panel, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        let touch = |phase| egui::Event::Touch { device_id: egui::TouchDeviceId(1), id: egui::TouchId(1), phase, pos: panel, force: None };
+        let mut raw = egui::RawInput {
+            time: Some(1.0),
+            events: vec![touch(egui::TouchPhase::Start), egui::Event::PointerMoved(panel), button(true)],
+            ..Default::default()
+        };
+        assert!(native.unavailable(&u.ctx, &mut raw).issues.is_empty());
+        assert!(u.ctx.data(|data| data.get_temp::<Drag>(drag_id())).is_none(), "remove the UI owner before egui sees any reset release");
+        u.ctx.run_ui(raw, |_| {}).drop_without_applying_deltas();
+        let mut raw =
+            egui::RawInput { time: Some(1.1), events: vec![touch(egui::TouchPhase::Cancel), egui::Event::PointerGone], ..Default::default() };
+        assert!(native.unavailable(&u.ctx, &mut raw).issues.is_empty());
+        assert!(raw.events.iter().any(|event| matches!(event, egui::Event::PointerButton { pressed: false, .. })));
+        assert!(u.app.canvas_pointer.is_some(), "engine restoration waits until the editor can be borrowed");
+        u.ctx.run_ui(raw, |ui| u.app.ui(ui)).drop_without_applying_deltas();
+        assert!(u.app.canvas_pointer.is_none());
+        assert!(std::sync::Arc::ptr_eq(&before, &u.app.session.ds().unwrap().doc));
     }
 }

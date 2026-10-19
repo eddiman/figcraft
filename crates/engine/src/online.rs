@@ -104,6 +104,38 @@ pub struct Recovering {
     at: Resume,
 }
 
+/// Each metadata category may be transferred into an empty category or left
+/// unchanged when its complete serialized members agree. Conflicting IDs never
+/// get concatenated or overwritten.
+fn recovery_metadata_compatible(target: &DocState, branches: &[figcraft_format::Branch], copy: &DocState) -> bool {
+    use figcraft_doc::Document;
+    use figcraft_format::ArchiveContent;
+    let same = |a: std::result::Result<ArchiveContent, figcraft_format::FormatError>,
+                b: std::result::Result<ArchiveContent, figcraft_format::FormatError>| {
+        a.ok().zip(b.ok()).is_some_and(|(a, b)| a.same_persisted_content(&b, false))
+    };
+    let empty = Document::new("Recovery metadata");
+    if !target.versions.is_empty()
+        && !same(ArchiveContent::capture(&empty, None, &target.versions, &[]), ArchiveContent::capture(&empty, None, &copy.versions, &[]))
+    {
+        return false;
+    }
+    if !branches.is_empty() && !same(ArchiveContent::capture(&empty, None, &[], branches), ArchiveContent::capture(&empty, None, &[], &copy.branches))
+    {
+        return false;
+    }
+    if target.document_itself().published.is_some() {
+        let mut a = empty.clone();
+        a.published = target.document_itself().published.clone();
+        let mut b = empty;
+        b.published = copy.document_itself().published.clone();
+        if !same(ArchiveContent::capture(&a, None, &[], &[]), ArchiveContent::capture(&b, None, &[], &[])) {
+            return false;
+        }
+    }
+    true
+}
+
 /// A name as shown: no control characters, at most 256 characters.
 fn clean_name(s: &str) -> String {
     s.trim().chars().filter(|c| !c.is_control()).take(256).collect()
@@ -277,6 +309,14 @@ impl Session {
         self.online_index(&server, &file).map(|_| (plain_server(&server), file, at))
     }
 
+    /// Independent server-pending state for registered online files. A local file
+    /// write must never clear this requirement for a recovery checkpoint.
+    pub(crate) fn registered_online_pending(&self, uid: u64) -> bool {
+        let live = self.live_of(uid);
+        let Some((server, file)) = live.server_file() else { return false };
+        self.online_index(&server, &file).is_some() && live.client().is_some_and(|client| client.pending() != 0)
+    }
+
     /// Settle the recovery copies whose file arrived from its server, or won't (see
     /// [`recover_file`]). Called when something happened in a session.
     pub(crate) fn online_recoveries(&mut self) {
@@ -306,24 +346,56 @@ impl Session {
         let name = r.copy.doc.name.clone();
         let me = client.resume();
         let ahead = figcraft_collab::diff(client.view(), &r.copy.doc).map(|d| d.changes);
-        if ahead.as_ref().is_ok_and(Vec::is_empty) {
-            return;
-        }
+        // Compare complete local archive metadata separately from collaboration
+        // changes. The collaboration protocol does not carry local history.
+        let compatible = self.docs.iter().find(|d| d.uid == uid).is_some_and(|target| {
+            let mut branches = target.branches.clone();
+            for tab in &self.docs {
+                if let Some((main, id)) = &tab.branch_of
+                    && *main == uid
+                    && let Some(branch) = branches.iter_mut().find(|b| b.id == *id)
+                {
+                    branch.head = tab.document_itself().clone();
+                    branch.versions = tab.versions.clone();
+                }
+            }
+            recovery_metadata_compatible(target, &branches, &r.copy)
+        });
+        let equal = ahead.as_ref().is_ok_and(Vec::is_empty);
         // New layers must be this client's to create (the server refuses anyone else's ids).
         let own = |changes: &[Change]| changes.iter().all(|c| !matches!(c, Change::Create { id, .. } if id.0 >> 32 != u64::from(me.client_id)));
-        if me == r.at && client.access() == Access::Edit && ahead.as_deref().is_ok_and(own) {
-            let mut doc = (*r.copy.doc).clone();
-            doc.set_client_id(me.client_id);
-            self.apply_remote(uid, std::sync::Arc::new(doc));
-            self.live_edit(uid, Some("Recovered changes"));
-            self.message = Some(format!("Recovered your changes to {name} that hadn't reached the server"));
+        let merge = me == r.at && client.access() == Access::Edit && ahead.as_deref().is_ok_and(own);
+        if compatible && (equal || merge) {
+            if !equal {
+                let mut doc = (*r.copy.doc).clone();
+                doc.set_client_id(me.client_id);
+                self.apply_remote(uid, std::sync::Arc::new(doc));
+                self.live_edit(uid, Some("Recovered changes"));
+                self.message = Some(format!("Recovered your changes to {name} that hadn't reached the server"));
+            }
+            if let Some(target) = self.docs.iter_mut().find(|d| d.uid == uid) {
+                if target.versions.is_empty() && !r.copy.versions.is_empty() {
+                    *target.versions_mut() = r.copy.versions.clone();
+                }
+                if target.branches.is_empty() && !r.copy.branches.is_empty() {
+                    *target.branches_mut() = r.copy.branches.clone();
+                }
+                if target.document_itself().published.is_none() && r.copy.document_itself().published.is_some() {
+                    target.doc_mut().published = r.copy.document_itself().published.clone();
+                }
+            }
             return;
         }
         let mut copy = *r.copy;
         std::sync::Arc::make_mut(&mut copy.doc).name = format!("{name} (recovered copy)");
         self.docs.push(copy);
-        self.message =
-            Some(format!("{name} changed on the server before your last changes reached it: they are open beside it as “{name} (recovered copy)”"));
+        self.message = Some(if !compatible {
+            format!(
+                "{name} has different local history, branches or published library data: your recovered file is open beside it as “{name} (recovered copy)”"
+            )
+        } else {
+            format!("{name} changed on the server before your last changes reached it: they are open beside it as “{name} (recovered copy)”")
+        });
     }
 
     /// The session open on recorded file `f`, if one is.
@@ -642,4 +714,46 @@ pub fn specs() -> Vec<CommandSpec> {
             recover_file
         ),
     ]
+}
+
+#[cfg(test)]
+mod pointer_barrier_tests {
+    use super::*;
+    #[test]
+    fn ipad_sync_recovery_cancels_before_opening_the_independent_copy() {
+        let mut session = Session::new();
+        let uid = session.ds().unwrap().uid;
+        let before = session.ds().unwrap().doc.clone();
+        let copy = Session::new().docs.remove(0);
+        session.live.recovering.push(Recovering { session: u64::MAX, copy: Box::new(copy), at: Resume { session: 1, client_id: 1, seq: 0 } });
+        let token = session.begin_pointer_gesture().unwrap();
+        session
+            .with_pointer_gesture(&token, |s| {
+                s.begin_interaction("Preview")?;
+                s.execute("shape.rectangle", &json!({"x":1,"y":2,"width":3,"height":4}))?;
+                Ok(())
+            })
+            .unwrap();
+        let mut called = false;
+        session.live_sync_in_with_barrier(
+            |_| true,
+            |s| {
+                assert_eq!(s.ds().unwrap().uid, uid);
+                assert_eq!(s.docs.len(), 1);
+                s.cancel_pointer_gesture(&token).unwrap();
+                called = true;
+            },
+        );
+        assert!(called);
+        assert_eq!(session.docs.len(), 2);
+        assert_ne!(session.ds().unwrap().uid, uid);
+        assert!(std::sync::Arc::ptr_eq(&before, &session.docs.iter().find(|d| d.uid == uid).unwrap().doc));
+    }
+    #[test]
+    fn ipad_sync_without_deferred_work_does_not_call_the_barrier() {
+        let mut session = Session::new();
+        let mut called = false;
+        session.live_sync_in_with_barrier(|_| true, |_| called = true);
+        assert!(!called);
+    }
 }

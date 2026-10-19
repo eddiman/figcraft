@@ -6,11 +6,16 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod a11y;
+pub mod adaptive;
+#[cfg(test)]
+mod adaptive_tests;
 pub mod assets_panel;
 pub mod bidi;
 pub mod branch_ui;
 pub mod canvas;
+mod canvas_pointer;
 pub mod cjk;
+mod clipboard_identity;
 pub mod colorpicker;
 pub mod comments;
 pub mod component_panel;
@@ -40,6 +45,14 @@ pub mod live_text;
 pub mod measure_overlay;
 pub mod menus;
 pub mod online;
+pub mod ordered_input;
+pub mod platform;
+pub mod platform_export_tree;
+#[cfg(test)]
+mod platform_export_tree_tests;
+pub mod platform_requests;
+#[cfg(test)]
+mod platform_requests_tests;
 pub mod plugins_ui;
 pub mod present;
 pub mod proto_canvas;
@@ -55,6 +68,10 @@ pub mod style_picker;
 pub mod tabs;
 pub mod theme;
 pub mod toolbar;
+pub mod touch;
+pub mod touch_events;
+pub mod touch_mouse;
+pub mod touch_native;
 pub mod typography;
 pub mod variable_ui;
 pub mod variables_panel;
@@ -178,6 +195,29 @@ pub use control::{ControlReply, ControlRequest};
 
 /// Platform services the app crate provides (file dialogs, clipboard, URLs).
 pub trait Services {
+    fn capabilities(&self) -> platform::PlatformCapabilities {
+        platform::PlatformCapabilities::desktop()
+    }
+    fn submit_request(&mut self, _request: platform_requests::PlatformRequest) -> platform_requests::Submission {
+        platform_requests::Submission::Rejected(platform_requests::RejectReason::Unsupported)
+    }
+    fn take_completion(&mut self) -> Option<platform_requests::Completion> {
+        None
+    }
+    fn cancel_request(&mut self, _id: platform_requests::RequestId) {}
+    /// Deferred adapters retain this notifier and request a frame when a completion arrives.
+    fn set_request_repaint(&mut self, _ctx: egui::Context) {}
+
+    fn supports_owned_saves(&self) -> bool {
+        false
+    }
+    fn submit_owned_save(&mut self, _request: platform_requests::OwnedSaveRequest) -> Result<(), String> {
+        Err("Saving owned documents is unavailable".into())
+    }
+    fn take_owned_save_completion(&mut self) -> Option<platform_requests::OwnedSaveCompletion> {
+        None
+    }
+
     fn pick_open(&mut self, _title: &str, _exts: &[&str]) -> Option<PathBuf> {
         None
     }
@@ -188,11 +228,29 @@ pub trait Services {
     fn pick_folder(&mut self, _title: &str) -> Option<PathBuf> {
         None
     }
+    /// Whether native clipboard writes require confirmation before success or mutation.
+    fn clipboard_requires_confirmation(&self) -> bool {
+        false
+    }
+    /// An explicit native Paste request, with no fallback board read.
+    fn clipboard_read_owned(&mut self) -> Option<egui::PasteOutcome> {
+        None
+    }
+    /// Synchronous confirmed write; unsupported adapters fail explicitly.
+    fn clipboard_try_set_layers(&mut self, text: &str) -> Result<Option<egui::PasteIdentity>, String> {
+        self.clipboard_try_set_text(text).map(|()| None)
+    }
+    fn clipboard_try_set_text(&mut self, _s: &str) -> Result<(), String> {
+        Err("Clipboard is unavailable".into())
+    }
     fn clipboard_set_text(&mut self, _s: &str) {}
     fn clipboard_get_text(&mut self) -> Option<String> {
         None
     }
     fn clipboard_set_png(&mut self, _w: u32, _h: u32, _rgba: &[u8]) {}
+    fn clipboard_try_set_png(&mut self, _w: u32, _h: u32, _rgba: &[u8]) -> Result<(), String> {
+        Err("Clipboard is unavailable".into())
+    }
     /// An image on the system clipboard as (width, height, straight RGBA).
     fn clipboard_get_image(&mut self) -> Option<(u32, u32, Vec<u8>)> {
         None
@@ -305,6 +363,7 @@ pub fn fit_panels(avail: f32, left: Option<f32>, right: f32) -> (f32, f32) {
 
 /// UI-only state (serialisable for `ui.inspect`).
 pub struct UiState {
+    pub adaptive: adaptive::Presentation,
     /// The widths asked for the side panels (a drag of their edge; [`fit_panels`] gives what a
     /// small window draws).
     pub left_width: f32,
@@ -404,6 +463,7 @@ pub struct UiState {
     /// What FigCraft last put on the system clipboard: when the clipboard still holds it, a paste
     /// uses our copied layers; anything else there (an image, SVG, text) came from another app.
     pub last_copy: Option<String>,
+    pub(crate) native_copy: Option<clipboard_identity::Association>,
     /// When (UI clock, seconds) open documents next get an autosave checkpoint.
     pub next_autosave: f64,
     /// The Assets panel shows the libraries view (publish this file, enabled libraries).
@@ -427,6 +487,7 @@ pub struct UiState {
 impl Default for UiState {
     fn default() -> Self {
         Self {
+            adaptive: adaptive::Presentation::default(),
             left_width: PANEL_DEFAULT,
             right_width: PANEL_DEFAULT,
             right_tab: RightTab::Design,
@@ -489,6 +550,7 @@ impl Default for UiState {
             dev: dev_mode::DevUi::default(),
 
             last_copy: None,
+            native_copy: None,
             next_autosave: 0.0,
             libraries: false,
             nav: a11y::Nav::default(),
@@ -533,6 +595,13 @@ pub struct FigApp {
     window_requests: Vec<figcraft_engine::UiRequest>,
     /// Commands waiting for a server ([`FigApp::run_background`]) and what to do with their results.
     waiting: Vec<(String, Done)>,
+    platform_requests: platform_requests::PendingRequests,
+    platform_context: egui::Context,
+    canvas_pointer: Option<canvas_pointer::Owner>,
+    /// Host barriers also invalidate pending contacts that have no checkpoint.
+    canvas_interruption: Option<u64>,
+    /// Only a complete opted-in boundary sets this for unsupported input.
+    canvas_input_blocked: bool,
 }
 
 /// What to do with the result of a command run in the background.
@@ -560,13 +629,23 @@ impl FigApp {
             windows: windows::Windows::default(),
             window_requests: Vec::new(),
             waiting: Vec::new(),
+            platform_requests: platform_requests::PendingRequests::default(),
+            platform_context: egui::Context::default(),
+            canvas_pointer: None,
+            canvas_interruption: Some(0),
+            canvas_input_blocked: false,
         }
     }
 
     /// Run a command, surfacing errors as a toast. Returns the result.
     pub fn run(&mut self, id: &str, params: Value) -> Option<Value> {
+        if !self.platform_command_allowed(id, &params) {
+            return None;
+        }
+        self.cancel_canvas_pointer();
         let r = self.session.execute(id, &params);
         self.handle_ui_requests();
+        self.cancel_closed_platform_requests();
         r.map_err(|e| self.failed(id, &e)).ok()
     }
 
@@ -583,6 +662,10 @@ impl FigApp {
     /// the answer arrives (the network wakes the window then); errors show as with [`run`](Self::run).
     /// [`Session::waiting_for`] tells the panels to show that it's on its way.
     pub fn run_background(&mut self, ctx: &egui::Context, id: &str, params: Value, done: Done) {
+        if !self.platform_command_allowed(id, &params) {
+            return;
+        }
+        self.cancel_canvas_pointer();
         self.waiting.retain(|(c, _)| c != id);
         let r = self.session.start_background(id, params);
         self.handle_ui_requests();
@@ -602,6 +685,7 @@ impl FigApp {
     /// Hand the results of background commands that finished to what's waiting for them.
     fn background_done(&mut self, ctx: &egui::Context) {
         while let Some((id, r)) = self.session.take_background_done() {
+            self.cancel_canvas_pointer();
             self.handle_ui_requests();
             let done = self.waiting.iter().position(|(c, _)| *c == id).map(|i| self.waiting.remove(i).1);
             match (r, done) {
@@ -625,6 +709,7 @@ impl FigApp {
         {
             return;
         }
+        self.cancel_canvas_pointer();
         let shown = self.session.execute("text.preview", &json!({"command": command, "params": params})).is_ok();
         let revision = self.session.ds().map_or(0, |d| d.revision);
         self.ui.text_preview = shown.then(|| (command.to_string(), params, revision));
@@ -635,6 +720,7 @@ impl FigApp {
     /// End the live text preview the panels show (Escape, or nothing hovered any more).
     pub fn end_text_preview(&mut self, ctx: &egui::Context) {
         if self.ui.text_preview.take().is_some() {
+            self.cancel_canvas_pointer();
             let _ = self.session.execute("text.endPreview", &json!({}));
             ctx.request_repaint();
         }
@@ -660,6 +746,9 @@ impl FigApp {
 
     /// Act on UI requests queued by commands (dialogs, panels).
     pub fn handle_ui_requests(&mut self) {
+        if !self.session.ui_requests.is_empty() {
+            self.cancel_canvas_pointer();
+        }
         let reqs = std::mem::take(&mut self.session.ui_requests);
         for r in reqs {
             match r.kind.as_str() {
@@ -690,9 +779,19 @@ impl FigApp {
                     self.services.save_prefs(&self.session.prefs);
                 }
                 "focus.region" => self.ui.nav.step(r.data.get("step").and_then(Value::as_i64).unwrap_or(1).clamp(-4, 4) as i32),
-                "panel.layers" => self.ui.left_tab = LeftTab::File,
-                "panel.assets" => self.ui.left_tab = LeftTab::Assets,
-                "panel.versionHistory" => versions::open(self),
+                "panel.layers" | "panel.assets" => {
+                    self.ui.left_tab = if r.kind == "panel.layers" { LeftTab::File } else { LeftTab::Assets };
+                    if self.ui.adaptive.enabled {
+                        self.ui.versions.open = false;
+                        adaptive::reveal_panel(self, adaptive::PanelSide::Left);
+                    }
+                }
+                "panel.versionHistory" => {
+                    versions::open(self);
+                    if self.ui.adaptive.enabled {
+                        adaptive::reveal_panel(self, adaptive::PanelSide::Left);
+                    }
+                }
                 "view.devCompare" => {
                     self.ui.dev.compare = r.data.get("id").and_then(figcraft_engine::params::id_of).map(dev_compare::CompareView::new);
                 }
@@ -700,6 +799,9 @@ impl FigApp {
                     self.ui.left_tab = LeftTab::Assets;
                     self.ui.left_collapsed = false;
                     self.ui.libraries = true;
+                    if self.ui.adaptive.enabled {
+                        adaptive::reveal_panel(self, adaptive::PanelSide::Left);
+                    }
                 }
                 "home" => self.ui.home = true,
                 "home.templates" => {
@@ -819,17 +921,37 @@ impl FigApp {
     }
 
     pub fn save_as_dialog(&mut self) {
-        let name = self.session.doc().map(|d| d.name.clone()).unwrap_or_else(|_| "Untitled".into());
-        if let Some(p) = self.services.pick_save(i18n::tr("Save as"), &format!("{name}.figcraft"), &["figcraft"]) {
-            let ps = p.to_string_lossy().to_string();
-            if self.run("file.saveAs", json!({"path": ps})).is_some() {
-                self.toast(i18n::trf("Saved {name}", &[("name", &p.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default())]));
-            }
+        use platform_requests::{Operation, Payload};
+        if self.services.supports_owned_saves() {
+            self.begin_owned_save(true);
+            return;
         }
+        if !self.desktop_document_write() {
+            return;
+        }
+        let name = self.session.doc().map(|d| d.name.clone()).unwrap_or_else(|_| "Untitled".into());
+        let picker = Self::picker(i18n::tr("Save as"), Some(format!("{name}.figcraft")), &["figcraft"]);
+        self.request_platform(
+            self.platform_document(),
+            Operation::SaveAs(picker),
+            Box::new(|app, payload| {
+                if let Payload::Destination(p) = payload
+                    && app.run("file.saveAs", json!({"path": p.to_string_lossy()})).is_some()
+                {
+                    app.toast(i18n::trf("Saved {name}", &[("name", &p.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default())]));
+                }
+            }),
+        );
     }
 
     pub fn save(&mut self) {
-        // A branch tab saves its main file.
+        if self.services.supports_owned_saves() {
+            self.begin_owned_save(false);
+            return;
+        }
+        if !self.desktop_document_write() {
+            return;
+        }
         let tab = figcraft_engine::branches::file_tab(&self.session);
         if self.session.docs.get(tab).is_some_and(|d| d.path.is_some()) {
             if self.run("file.save", json!({})).is_some() {
@@ -841,14 +963,19 @@ impl FigApp {
     }
 
     pub fn open_dialog(&mut self) {
-        if let Some(p) =
-            self.services.pick_open(i18n::tr("Open"), &["figcraft", "fig", "json", "svg", "png", "jpg", "jpeg", "webp", "gif", "tif", "tiff"])
-        {
-            let ps = p.to_string_lossy().to_string();
-            if self.run("file.open", json!({"path": ps})).is_some() {
-                self.ui.home = false;
-            }
-        }
+        use platform_requests::{Operation, Payload};
+        let picker = Self::picker(i18n::tr("Open"), None, &["figcraft", "fig", "json", "svg", "png", "jpg", "jpeg", "webp", "gif", "tif", "tiff"]);
+        self.request_platform(
+            None,
+            Operation::OpenCopy(picker),
+            Box::new(|app, payload| {
+                if let Payload::Selected(copy) = payload
+                    && app.run("file.open", json!({"path": copy.path.to_string_lossy()})).is_some()
+                {
+                    app.ui.home = false;
+                }
+            }),
+        );
     }
 
     pub fn import_dialog(&mut self, place: bool) {
@@ -857,10 +984,32 @@ impl FigApp {
         } else {
             &["svg", "png", "jpg", "jpeg", "webp", "gif", "tif", "tiff", "figcraft", "fig"]
         };
-        if let Some(p) = self.services.pick_open(if place { i18n::tr("Place image") } else { i18n::tr("Import") }, exts) {
-            let ps = p.to_string_lossy().to_string();
-            self.run("file.import", json!({"path": ps}));
-        }
+        let selection = self.session.ds().map(|v| v.selection.clone()).unwrap_or_default();
+        let page = self.session.ds().ok().map(|d| d.page);
+        self.import_copy(
+            if place { i18n::tr("Place image") } else { i18n::tr("Import") },
+            exts,
+            Box::new(move |app, path| {
+                let previous = app.session.ds().ok().map(|d| (d.page, d.selection.clone()));
+                if let Some(page) = page {
+                    if !app.session.doc().is_ok_and(|d| d.node(page).is_some()) {
+                        app.platform_error("Import target page no longer exists");
+                        return;
+                    }
+                    if let Ok(ds) = app.session.ds_mut() {
+                        ds.page = page;
+                        ds.selection = selection;
+                    }
+                }
+                if app.run("file.import", json!({"path": path.to_string_lossy()})).is_none()
+                    && let Some((page, selection)) = previous
+                    && let Ok(ds) = app.session.ds_mut()
+                {
+                    ds.page = page;
+                    ds.selection = selection;
+                }
+            }),
+        );
     }
 
     /// Reduced motion: the preference or the system's setting.
@@ -897,6 +1046,14 @@ impl FigApp {
 
     /// Per-frame logic that doesn't draw (control requests, theme, language).
     pub fn logic(&mut self, ctx: &egui::Context) {
+        self.canvas_pointer_preflight(ctx);
+        // Until ordered contact dispatch is installed, enrolled callers must
+        // interrupt before widgets, IME or panel fields can mutate Session.
+        if ctx.input(|input| input.events.iter().any(touch_events::external_edit_event)) {
+            self.cancel_canvas_pointer();
+        }
+        self.platform_context = ctx.clone();
+        self.poll_platform_requests(ctx);
         if self.language.as_ref() != Some(&self.session.prefs.language) {
             i18n::set(&self.session.prefs.language, self.services.system_language().as_deref());
             self.language = Some(self.session.prefs.language.clone());
@@ -942,6 +1099,7 @@ impl FigApp {
             return;
         }
         if self.ui.next_autosave > 0.0 {
+            self.cancel_canvas_pointer();
             let active = self.session.active;
             for i in 0..self.session.docs.len() {
                 self.session.active = i;
@@ -958,6 +1116,7 @@ impl FigApp {
         #[cfg(not(target_arch = "wasm32"))]
         let t0 = std::time::Instant::now();
         let ctx = ui.ctx().clone();
+        self.canvas.input_source = None;
         self.frame_stats.record(&ctx);
         let first = !self.fonts_installed;
         self.logic(&ctx);
@@ -968,7 +1127,7 @@ impl FigApp {
             return;
         }
         // What happened in a live session (the network woke us for it).
-        if self.session.live_poll() {
+        if self.poll_live_with_pointer_barrier() {
             if let Some(m) = self.session.message.take() {
                 self.toast(m);
             }
@@ -996,12 +1155,19 @@ impl FigApp {
     /// One frame of the window drawing now.
     pub(crate) fn frame(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new("ipad_touch_density"), self.ui.adaptive.enabled));
+        if self.ui.adaptive.enabled {
+            ui.spacing_mut().interact_size = egui::vec2(44.0, 44.0);
+        }
         let t = theme::Tokens::get(&ctx);
         // A field that had the keyboard when the frame began keeps its keys from the shortcuts
         // even if it lets go during the frame (Enter commits it), or as it began (egui drops the
         // focus on Escape before the frame, which cancels the field's edit and nothing else).
         let typing = std::mem::take(&mut self.field_focus) || a11y::field_focused(&ctx);
         // Control requests run first so their results reflect this frame.
+        if !self.control_queue.is_empty() {
+            self.cancel_canvas_pointer();
+        }
         control::drain(self, &ctx);
         windows::requests(self, &ctx);
         // Before any widget: the navigation keys (F6, Tab, arrows, Escape) move the keyboard.
@@ -1032,78 +1198,82 @@ impl FigApp {
             return;
         }
         let hidden = self.session.ds().map(|d| d.view.ui_hidden).unwrap_or(false);
-        tabs::tab_bar(self, ui);
-        if !hidden {
-            egui::Panel::left("left_rail")
-                .exact_size(56.0)
-                .resizable(false)
-                .frame(egui::Frame::NONE.fill(t.panel).stroke(egui::Stroke::new(1.0, t.border)))
-                .show(ui, |ui| {
-                    a11y::region(&mut self.ui.nav, ui, a11y::Region::Layers, egui::accesskit::Role::Navigation, i18n::tr("Sidebar"));
-                    layers::rail(self, ui)
-                });
-        }
-        // The panels are as wide as asked, less in a window too small for them and the canvas.
-        let left_open = !hidden && !self.ui.left_collapsed;
-        let (left_w, right_w) = fit_panels(ui.available_width(), left_open.then_some(self.ui.left_width), self.ui.right_width);
-        let rows = ui.available_rect_before_wrap().y_range();
-        let mut edges: Vec<(&str, f32, f32, f32)> = Vec::new();
-        if left_open {
-            edges.push(("left", ui.available_rect_before_wrap().min.x + left_w, left_w, 1.0));
-            egui::Panel::left("left_panel")
-                .resizable(false)
-                .exact_size(left_w)
-                .frame(egui::Frame::NONE.fill(t.panel).stroke(egui::Stroke::new(1.0, t.border)))
-                .show(ui, |ui| {
-                    let label = match self.ui.left_tab {
-                        _ if self.ui.versions.open => i18n::tr("Version history"),
-                        LeftTab::File => i18n::tr("Layers"),
-                        LeftTab::Assets => i18n::tr("Assets"),
-                    };
-                    a11y::region(&mut self.ui.nav, ui, a11y::Region::Layers, egui::accesskit::Role::Pane, label);
-                    layers::left_panel(self, ui)
-                });
-        }
-        if !hidden {
-            edges.push(("right", ui.available_rect_before_wrap().max.x - right_w, right_w, -1.0));
-            egui::Panel::right("right_panel")
-                .resizable(false)
-                .exact_size(right_w)
-                .frame(egui::Frame::NONE.fill(t.panel).stroke(egui::Stroke::new(1.0, t.border)))
-                .show(ui, |ui| {
-                    let label = match self.ui.right_tab {
-                        RightTab::Design => i18n::tr("Design"),
-                        RightTab::Prototype => i18n::tr("Prototype"),
-                        RightTab::Inspect => i18n::tr("Dev Mode"),
-                    };
-                    a11y::region(&mut self.ui.nav, ui, a11y::Region::Properties, egui::accesskit::Role::Pane, label);
-                    right::right_panel(self, ui)
-                });
-        }
-        egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.canvas)).show(ui, |ui| {
-            let worker = self.worker.take();
-            let mut worker = worker.unwrap_or_else(|| render_worker::Worker::new(ctx.clone()));
-            canvas::show(self, ui, &mut worker);
-            self.worker = Some(worker);
+        if self.ui.adaptive.enabled {
+            adaptive::show(self, ui, hidden);
+        } else {
+            tabs::tab_bar(self, ui);
             if !hidden {
-                ui.scope_builder(egui::UiBuilder::new().id_salt("toolbar"), |ui| {
-                    a11y::container(ui, egui::accesskit::Role::Toolbar, i18n::tr("Tools"));
-                    toolbar::show(self, ui);
-                });
+                egui::Panel::left("left_rail")
+                    .exact_size(56.0)
+                    .resizable(false)
+                    .frame(egui::Frame::NONE.fill(t.panel).stroke(egui::Stroke::new(1.0, t.border)))
+                    .show(ui, |ui| {
+                        a11y::region(&mut self.ui.nav, ui, a11y::Region::Layers, egui::accesskit::Role::Navigation, i18n::tr("Sidebar"));
+                        layers::rail(self, ui)
+                    });
             }
-        });
-        // The panels' edges, over the canvas and the panels (drawn after them: they take the press).
-        for (name, x, shown, grows) in edges {
-            if let Some(w) = Self::panel_edge(ui, name, x, rows, shown, grows) {
-                let (l, r) = if name == "left" { (w, self.ui.right_width) } else { (self.ui.left_width, w) };
-                self.set_panel_widths(l, r);
-                self.panels_unsaved = true;
+            // The panels are as wide as asked, less in a window too small for them and the canvas.
+            let left_open = !hidden && !self.ui.left_collapsed;
+            let (left_w, right_w) = fit_panels(ui.available_width(), left_open.then_some(self.ui.left_width), self.ui.right_width);
+            let rows = ui.available_rect_before_wrap().y_range();
+            let mut edges: Vec<(&str, f32, f32, f32)> = Vec::new();
+            if left_open {
+                edges.push(("left", ui.available_rect_before_wrap().min.x + left_w, left_w, 1.0));
+                egui::Panel::left("left_panel")
+                    .resizable(false)
+                    .exact_size(left_w)
+                    .frame(egui::Frame::NONE.fill(t.panel).stroke(egui::Stroke::new(1.0, t.border)))
+                    .show(ui, |ui| {
+                        let label = match self.ui.left_tab {
+                            _ if self.ui.versions.open => i18n::tr("Version history"),
+                            LeftTab::File => i18n::tr("Layers"),
+                            LeftTab::Assets => i18n::tr("Assets"),
+                        };
+                        a11y::region(&mut self.ui.nav, ui, a11y::Region::Layers, egui::accesskit::Role::Pane, label);
+                        layers::left_panel(self, ui)
+                    });
             }
-        }
-        // Kept once the drag is over (not on every pointer move).
-        if self.panels_unsaved && !ctx.input(|i| i.pointer.any_down()) {
-            self.panels_unsaved = false;
-            self.services.save_prefs(&self.session.prefs);
+            if !hidden {
+                edges.push(("right", ui.available_rect_before_wrap().max.x - right_w, right_w, -1.0));
+                egui::Panel::right("right_panel")
+                    .resizable(false)
+                    .exact_size(right_w)
+                    .frame(egui::Frame::NONE.fill(t.panel).stroke(egui::Stroke::new(1.0, t.border)))
+                    .show(ui, |ui| {
+                        let label = match self.ui.right_tab {
+                            RightTab::Design => i18n::tr("Design"),
+                            RightTab::Prototype => i18n::tr("Prototype"),
+                            RightTab::Inspect => i18n::tr("Dev Mode"),
+                        };
+                        a11y::region(&mut self.ui.nav, ui, a11y::Region::Properties, egui::accesskit::Role::Pane, label);
+                        right::right_panel(self, ui)
+                    });
+            }
+            egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.canvas)).show(ui, |ui| {
+                let worker = self.worker.take();
+                let mut worker = worker.unwrap_or_else(|| render_worker::Worker::new(ctx.clone()));
+                canvas::show(self, ui, &mut worker);
+                self.worker = Some(worker);
+                if !hidden {
+                    ui.scope_builder(egui::UiBuilder::new().id_salt("toolbar"), |ui| {
+                        a11y::container(ui, egui::accesskit::Role::Toolbar, i18n::tr("Tools"));
+                        toolbar::show(self, ui);
+                    });
+                }
+            });
+            // The panels' edges, over the canvas and the panels (drawn after them: they take the press).
+            for (name, x, shown, grows) in edges {
+                if let Some(w) = Self::panel_edge(ui, name, x, rows, shown, grows) {
+                    let (l, r) = if name == "left" { (w, self.ui.right_width) } else { (self.ui.left_width, w) };
+                    self.set_panel_widths(l, r);
+                    self.panels_unsaved = true;
+                }
+            }
+            // Kept once the drag is over (not on every pointer move).
+            if self.panels_unsaved && !ctx.input(|i| i.pointer.any_down()) {
+                self.panels_unsaved = false;
+                self.services.save_prefs(&self.session.prefs);
+            }
         }
         // Before the shortcuts: keys the hovered pane's prototype uses don't reach the editor, and
         // the arrows step through comment threads with the Comment tool.
@@ -1130,8 +1300,7 @@ impl FigApp {
         windows::requests(self, &ctx);
         // Your pointer, selection and view to the others in each live session (when they
         // changed), from the window with its file.
-        let windows = &self.windows;
-        self.session.live_sync_in(|uid| uid.map_or(0, |u| windows.of(u)) == windows.current);
+        self.sync_live_with_pointer_barrier();
     }
 
     fn toast_ui(&mut self, ctx: &egui::Context) {
