@@ -7,8 +7,14 @@ direct active tools and prompt-local save failure feedback. Targeted shared
 tests and the iPad app check pass. The full UI suite lacks the optional
 craft-font checkout. Xcode 26.3 built and installed the development app on an
 iPad Air 11-inch (M3) Simulator, and direct launch plus image capture passed.
-The packaging test runner stopped after installation without a test summary, so
-automated interaction evidence remains open. It retains engine, renderer,
+The 2026-10-28 continuation recovers packaged positive smoke (one pass) on an
+isolated simulator and records two passing native diagnostic cases with
+Home/editor/tool/panel/save-error/keyboard captures. A local compact-toolbar
+repair changes vertically stacked controls to one horizontal scroll row;
+17 adaptive tests, both iOS checks and WASM pass. Workspace formatting/Clippy
+pass; broad CI fails on missing pinned font inputs. The visible development
+simulator now runs the rebuilt app with document/recovery files preserved.
+It retains engine, renderer,
 document, command, saved-state/recovery and event-loop behavior. Physical iPad
 Air 5 observations remain preliminary; T20's focused-field keyboard restart
 and touch-selection finding remains open, and T32 is undecided. No release
@@ -23,8 +29,11 @@ typed strings. D20 revision 1 records the bounded review. Physical composition,
 native range/undo semantics and keyboard variants remain unqualified; T20
 stays blocked and T32 undecided. A 2026-10-28 local `egui-winit` guard also
 avoids interrupting an already focused iOS field, because the existing winit
-path resigns and then restores first responder. The guard needs its own
-simulator and physical validation. No native adapter or dependency changed.
+path resigns and then restores first responder. A current-worktree simulator
+check now passes four repeated field taps with appended text and double-tap
+word replacement. It includes the untouched local edit menu and does not
+measure responder restarts or qualify physical input. No native adapter or
+dependency changed.
 
 Local iPad retained-UI audit, 2026-10-19: T22 repairs 44-point touch-tool
 targets, focus names/scrolling, drawer/save-prompt keyboard restoration and

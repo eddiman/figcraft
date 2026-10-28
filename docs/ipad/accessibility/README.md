@@ -12,11 +12,17 @@ scoped shared iPad presentation profile. It adds no VoiceOver bridge and does
 not claim Dynamic Type support. The 100/150/200 percent choices apply only to
 the adaptive iPad presentation. The shared tests cover compact, medium and wide
 logical widths, threshold edges, keyboard geometry and focus restoration.
-Rendered Home, tabs, layer, inspector and tool capture remains a review item.
+The 2026-10-28 continuation captures Home, editor, layers, inspector, tool,
+save-error and keyboard states on an isolated iPad simulator. Inspection found
+compact tools stacked vertically behind the landscape keyboard; the local
+horizontal-row repair passes a new regression, all 17 adaptive tests and two
+native diagnostic cases. Physical capture remains a review item.
 
 The physical iPad Air 5 record remains preliminary. Its repeated focused-field
 tap keyboard restart and touch text-selection issue stays with T20. A
-presentation pass does not close that input gate or decide T32.
+presentation pass does not close that input gate or decide T32. A bounded
+current-worktree simulator check passes repeated field taps and double-tap
+word replacement, without measuring native responder restarts.
 
 ## Repairs and software coverage
 

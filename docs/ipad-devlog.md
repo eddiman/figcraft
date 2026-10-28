@@ -1,5 +1,20 @@
 # Local iPad port development log
 
+## 2026-10-28: T35 compact keyboard toolbar repair
+
+Native T35 captures initially showed no active Move control above the software
+keyboard. A focused regression identified the compact tool shelf as the cause:
+it laid controls out vertically, leaving a 26-point disclosure inside the
+required 66-point touch row. The compact shelf now contains one horizontally
+scrolling row, while the ordinary touch toolbar, desktop and web layouts retain
+their existing presentation.
+
+The 17-case adaptive suite passes, as do two native diagnostics after the
+repair. Both iOS target checks and the web/plugin build pass. The full UI suite
+has one environment failure because `../craft-fonts/fonts/latin-manifest.txt`
+is absent, and full CI has the two related text-font failures. The repair does
+not establish physical-device acceptance.
+
 ## 2026-10-28: T20 focused-field IME interruption guard
 
 The local `egui-winit` patch no longer interrupts composition for an already

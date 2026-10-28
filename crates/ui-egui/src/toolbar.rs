@@ -57,7 +57,9 @@ fn remembered(ui: &Ui, key: &str, default: ToolId) -> ToolId {
 /// The same tool catalog and command routes, allocated in scrollable touch rows.
 pub(crate) fn touch_show(app: &mut FigApp, ui: &mut Ui, compact: bool) {
     if compact {
-        touch_compact(app, ui);
+        egui::ScrollArea::horizontal().id_salt("touch_compact_tools").show(ui, |ui| {
+            ui.horizontal(|ui| touch_compact(app, ui));
+        });
         return;
     }
     egui::ScrollArea::horizontal().id_salt("touch_tools").show(ui, |ui| {

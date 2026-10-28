@@ -408,6 +408,22 @@ fn ipad_primary_actions_reachable() {
 }
 
 #[test]
+fn ipad_compact_tools_remain_reachable_with_enlarged_text_and_keyboard() {
+    let mut e = Editor::new(vec2(1200.0, 700.0));
+    e.app.ui.adaptive.text_scale = crate::adaptive::UiTextScale::Percent150;
+    let keyboard = Rect::from_min_max(pos2(0.0, 336.0), pos2(1200.0, 700.0));
+    e.app.ui.adaptive.keyboard = Some(keyboard);
+    for _ in 0..4 {
+        e.frame(vec![]);
+    }
+    for key in ["move", "tool_disclosure", "tool_more", "touch_controls"] {
+        let rect = e.action(key);
+        assert!(rect.width() >= 66.0 && rect.height() >= 66.0, "{key}: {rect:?}");
+        assert!(!rect.intersect(keyboard).is_positive(), "{key}: {rect:?}");
+    }
+}
+
+#[test]
 fn ipad_touch_numeric_binding_has_separate_allocated_targets() {
     let ctx = egui::Context::default();
     let id = egui::Id::new("touch_numeric_geometry");

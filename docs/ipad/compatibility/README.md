@@ -44,6 +44,10 @@ Conflict counts, integration duration, retired patches and post-merge behavior
 are therefore not available. No main/release branch, authentication, signing,
 workflow or branding configuration was changed.
 
-T35 source evidence records the scoped profile, geometry and owned-save tests.
-Xcode is unavailable in the implementation environment, so iOS target,
-simulator and physical-device qualification remain separate review work.
+T35's 2026-10-28 continuation uses Xcode 26.3 to pass packaged positive smoke,
+two native simulator diagnostics, both iOS target checks and web/plugin WASM.
+The compact-toolbar follow-up retains one horizontal row above the keyboard,
+covered by a new failing-before regression and all 17 adaptive tests.
+Workspace formatting/Clippy pass; broad CI fails on the missing pinned font
+inputs. These are development results, not physical-device qualification or an
+upstream-update rehearsal.

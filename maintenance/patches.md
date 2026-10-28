@@ -31,6 +31,12 @@ existing command IDs and owned-save semantics. This entry has no physical
 qualification or release claim. The repeated iPad Air 5 field-tap keyboard
 restart and touch-selection finding remains T20 work.
 
+The 2026-10-28 T35 continuation keeps compact tools in one horizontally
+scrollable row instead of stacking them vertically behind the keyboard.
+Preserve `ipad_compact_tools_remain_reachable_with_enlarged_text_and_keyboard`
+when merging this branch. All 17 adaptive tests, two native simulator
+diagnostics, both iOS checks and WASM pass; physical qualification remains open.
+
 No upstream proposal is recorded for these changes. The fork's existing PR is
 not an upstream acceptance. Do not resolve conflicts with blanket ours/theirs,
 reset upstream ancestry, or remove patches solely because a merge is clean.
