@@ -1,5 +1,24 @@
 # Local iPad port development log
 
+## 2026-10-29: restore shared floating toolbar on iPad
+
+The retained simulator image used the shared editor's floating icon toolbar,
+while the current iPad startup enabled the adaptive presentation path and
+replaced it with a labelled two-row shelf. The visual target is now explicit:
+regular-width, keyboard-free iPad workspaces use the shared floating toolbar.
+
+The ordinary horizontal pill remains in wide canvases. A portrait canvas that
+cannot contain it uses a vertical icon rail with 44-point targets for each
+active tool and each group disclosure. The rail retains the shared icons,
+flyouts, assets, actions, modes and help routes. The adaptive shelf remains
+active below 800 points and while a software keyboard occludes the workspace.
+
+The adaptive suite passes 18 tests. The new bundle was built, installed and
+inspected in the iPad Air 11-inch (M3) Simulator, where the vertical rail
+renders without clipping behind the panels. This changes editor presentation
+only and leaves engine, document, command, save, recovery and event-loop
+behaviour unchanged.
+
 ## 2026-10-28: T35 compact keyboard toolbar repair
 
 Native T35 captures initially showed no active Move control above the software

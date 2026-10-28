@@ -6,6 +6,7 @@ use crate::{CANVAS_MIN, LEFT_PANEL, PANEL_DEFAULT, RIGHT_PANEL};
 
 pub const MEDIUM_WIDTH: f32 = 760.0;
 pub const WIDE_WIDTH: f32 = 1100.0;
+pub const FLOATING_TOOLBAR_MIN_WIDTH: f32 = 800.0;
 const MAX_EXTENT: f32 = 1_000_000.0;
 const MIN_DOCK_HEIGHT: f32 = 160.0;
 
@@ -60,6 +61,9 @@ impl UiTextScale {
 
 pub struct Presentation {
     pub enabled: bool,
+    /// On a sufficiently wide iPad without the software keyboard, retain the shared editor's
+    /// floating icon toolbar rather than replacing it with the touch shelf.
+    pub prefer_floating_toolbar: bool,
     pub text_scale: UiTextScale,
     /// Window-point geometry supplied by the native host, never inferred from safe areas.
     pub keyboard: Option<Rect>,
@@ -80,6 +84,7 @@ impl Default for Presentation {
     fn default() -> Self {
         Self {
             enabled: false,
+            prefer_floating_toolbar: false,
             text_scale: UiTextScale::default(),
             keyboard: None,
             drawer: None,
@@ -93,6 +98,12 @@ impl Default for Presentation {
             actions: Vec::new(),
         }
     }
+}
+
+/// Regular-width iPad workspaces retain the shared canvas chrome. The compact touch presentation
+/// takes over when the window narrows or the keyboard occludes the canvas.
+pub(crate) fn uses_floating_toolbar(presentation: &Presentation, window_width: f32) -> bool {
+    presentation.enabled && presentation.prefer_floating_toolbar && presentation.keyboard.is_none() && window_width >= FLOATING_TOOLBAR_MIN_WIDTH
 }
 
 impl Presentation {

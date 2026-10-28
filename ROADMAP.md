@@ -20,6 +20,15 @@ Air 5 observations remain preliminary; T20's focused-field keyboard restart
 and touch-selection finding remains open, and T32 is undecided. No release
 readiness is claimed.
 
+Local iPad toolbar correction, 2026-10-29: direct comparison with the retained
+editor reference confirmed that the iPad startup path had selected the adaptive
+text shelf instead of the shared floating icon toolbar. The iPad presentation
+now selects the floating toolbar from 800 points without keyboard occlusion.
+When the canvas cannot fit that toolbar horizontally, it uses a vertical icon
+rail with separate 44-point tool and disclosure targets. Narrow windows and
+keyboard-visible work return to the adaptive shelf. The adaptive suite passes
+18 tests, and a rebuilt iPad Air 11-inch (M3) Simulator shows the vertical rail.
+
 Local iPad canvas-focus repair, 2026-10-19: T20 traced disappearing native
 input to missing shared IME output on event-free redraws. The shared handler
 now preserves active canvas text presentation before returning for empty

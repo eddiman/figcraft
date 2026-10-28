@@ -424,6 +424,19 @@ fn ipad_compact_tools_remain_reachable_with_enlarged_text_and_keyboard() {
 }
 
 #[test]
+fn ipad_uses_floating_toolbar_only_in_wide_unoccluded_workspaces() {
+    let mut presentation = crate::adaptive::Presentation::default();
+    presentation.enabled = true;
+    presentation.prefer_floating_toolbar = true;
+
+    assert!(crate::adaptive::uses_floating_toolbar(&presentation, crate::adaptive::FLOATING_TOOLBAR_MIN_WIDTH));
+    assert!(!crate::adaptive::uses_floating_toolbar(&presentation, crate::adaptive::FLOATING_TOOLBAR_MIN_WIDTH - 1.0));
+
+    presentation.keyboard = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1.0, 1.0)));
+    assert!(!crate::adaptive::uses_floating_toolbar(&presentation, crate::adaptive::FLOATING_TOOLBAR_MIN_WIDTH));
+}
+
+#[test]
 fn ipad_touch_numeric_binding_has_separate_allocated_targets() {
     let ctx = egui::Context::default();
     let id = egui::Id::new("touch_numeric_geometry");

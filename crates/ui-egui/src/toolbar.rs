@@ -50,6 +50,8 @@ const GROUPS: &[Group] = &[
     Group { key: "comment", name: tr_noop("Comment"), tools: &[(ToolId::Comment, Icon::Comment)] },
 ];
 
+const HORIZONTAL_TOOLBAR_MIN_CANVAS_WIDTH: f32 = 540.0;
+
 fn remembered(ui: &Ui, key: &str, default: ToolId) -> ToolId {
     ui.data(|d| d.get_temp::<u8>(egui::Id::new(("tb_last", key)))).and_then(|i| ToolId::ALL.get(i as usize).copied()).unwrap_or(default)
 }
@@ -240,6 +242,10 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
         builder_toolbar(app, ui);
         return;
     }
+    if canvas.width() < HORIZONTAL_TOOLBAR_MIN_CANVAS_WIDTH {
+        vertical_toolbar(app, ui, canvas, &t);
+        return;
+    }
     let cell = 32.0;
     let gap = 4.0;
     let width = GROUPS.len() as f32 * (cell + 4.0) + 4.0 * 10.0 + 2.0 * (cell + 4.0) + 16.0 + 4.0 * 34.0 + 24.0;
@@ -370,6 +376,173 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
             }
         }
     });
+}
+
+/// A narrow canvas leaves insufficient horizontal room for the full floating toolbar. Keep the
+/// shared icon language, but stack its tool groups in a rail so each group and disclosure keeps a
+/// separate 44-point touch target.
+fn vertical_toolbar(app: &mut FigApp, ui: &mut Ui, canvas: Rect, t: &Tokens) {
+    const CELL: f32 = 44.0;
+    let rows = GROUPS.len() + GROUPS.iter().filter(|group| group.tools.len() > 1).count() + 2 + 4 + 1;
+    let rect = vertical_pill(ui, &mut app.ui.nav, canvas, rows, t);
+    let x = rect.center().x;
+    let mut y = rect.min.y + 8.0;
+    let current = app.session.tool.tool;
+
+    for group in GROUPS {
+        let in_group = group.tools.iter().any(|(tool, _)| *tool == current);
+        let shown = if in_group { current } else { remembered(ui, group.key, group.tools[0].0) };
+        let icon = group.tools.iter().find(|(tool, _)| *tool == shown).map(|(_, icon)| *icon).unwrap_or(Icon::Move);
+        let tool_rect = Rect::from_min_size(pos2(x - CELL / 2.0, y), vec2(CELL, CELL));
+        let response = tool_cell(
+            ui,
+            t,
+            tool_rect,
+            ("tool", group.key),
+            icon,
+            in_group,
+            &format!("{}  {}", tr(shown.label()), pretty_shortcut(shown.shortcut())),
+        );
+        if in_group {
+            a11y::prefer(&mut app.ui.nav, Region::Toolbar, response.id);
+        }
+        if response.clicked() {
+            if in_group && shown.draws_shape() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+                app.run("tool.place", json!({}));
+                app.ui.nav.go(Region::Canvas);
+            } else {
+                app.run("tool.set", json!({"tool": shown.id()}));
+            }
+        }
+        y += CELL;
+
+        if group.tools.len() > 1 {
+            let disclosure = Rect::from_min_size(pos2(x - CELL / 2.0, y), vec2(CELL, CELL));
+            let response = ui.interact(disclosure, ui.id().with(("flyout", group.key)), Sense::click());
+            let open = app.ui.tool_flyout == Some(group.key);
+            a11y::menu_button(&response, tr(group.name), open);
+            if open {
+                a11y::popup(&mut app.ui.nav, response.id, flyout_id(group.key));
+            }
+            if response.hovered() {
+                ui.painter().rect_filled(disclosure.shrink(6.0), CornerRadius::same(5), t.hover);
+            }
+            icons::paint(ui.painter(), Rect::from_center_size(disclosure.center(), vec2(10.0, 10.0)), Icon::Chevron, t.icon_secondary);
+            if response.clicked() {
+                app.ui.tool_flyout = if open { None } else { Some(group.key) };
+            }
+            if app.ui.tool_flyout == Some(group.key) {
+                flyout_at(app, ui, group, pos2(rect.max.x + 8.0, tool_rect.min.y));
+            }
+            y += CELL;
+        }
+    }
+
+    ui.painter().line_segment([pos2(rect.min.x + 8.0, y), pos2(rect.max.x - 8.0, y)], Stroke::new(1.0, t.border));
+    y += 4.0;
+    for (icon, tip, id) in [(Icon::Assets, tr("Resources"), "resources"), (Icon::Actions, tr("Actions"), "actions")] {
+        let button = Rect::from_min_size(pos2(x - CELL / 2.0, y), vec2(CELL, CELL));
+        let response = ui.interact(button, ui.id().with(id), Sense::click()).tip(tip);
+        if response.hovered() {
+            ui.painter().rect_filled(button.shrink(6.0), CornerRadius::same(5), t.hover);
+        }
+        icons::paint(ui.painter(), Rect::from_center_size(button.center(), vec2(18.0, 18.0)), icon, t.icon);
+        if response.clicked() {
+            if id == "actions" {
+                app.ui.palette = Some(String::new());
+            } else {
+                app.ui.left_tab = crate::LeftTab::Assets;
+                app.ui.left_collapsed = false;
+            }
+        }
+        y += CELL;
+    }
+
+    ui.painter().line_segment([pos2(rect.min.x + 8.0, y), pos2(rect.max.x - 8.0, y)], Stroke::new(1.0, t.border));
+    y += 4.0;
+    let modes = [(Icon::Pencil, tr("Draw")), (Icon::Frame, tr("Design")), (Icon::Prototype, tr("Prototype")), (Icon::Code, tr("Inspect"))];
+    let active = match app.ui.right_tab {
+        crate::RightTab::Design if app.session.tool.tool == ToolId::Pencil => 0,
+        crate::RightTab::Design => 1,
+        crate::RightTab::Prototype => 2,
+        crate::RightTab::Inspect => 3,
+    };
+    for (index, (icon, tip)) in modes.iter().enumerate() {
+        let button = Rect::from_min_size(pos2(x - CELL / 2.0, y), vec2(CELL, CELL));
+        let response = ui.interact(button, ui.id().with(("mode", index)), Sense::click()).on_hover_text(*tip);
+        a11y::toggle(&response, tip, index == active);
+        if index == active {
+            ui.painter().rect_filled(button.shrink(6.0), CornerRadius::same(6), t.panel);
+            ui.painter().rect_stroke(button.shrink(6.0), CornerRadius::same(6), Stroke::new(1.0, t.border), StrokeKind::Inside);
+        } else if response.hovered() {
+            ui.painter().rect_filled(button.shrink(6.0), CornerRadius::same(6), t.hover);
+        }
+        icons::paint(
+            ui.painter(),
+            Rect::from_center_size(button.center(), vec2(18.0, 18.0)),
+            *icon,
+            if index == active { t.accent_text } else { t.icon_secondary },
+        );
+        if response.clicked() {
+            match index {
+                0 => {
+                    app.ui.right_tab = crate::RightTab::Design;
+                    app.run("tool.set", json!({"tool": "pencil"}));
+                }
+                1 => {
+                    app.ui.right_tab = crate::RightTab::Design;
+                    if app.session.tool.tool == ToolId::Pencil {
+                        app.run("tool.set", json!({"tool": "move"}));
+                    }
+                }
+                2 => app.ui.right_tab = crate::RightTab::Prototype,
+                _ => app.ui.right_tab = crate::RightTab::Inspect,
+            }
+        }
+        y += CELL;
+    }
+
+    let help = Rect::from_min_size(pos2(x - CELL / 2.0, y), vec2(CELL, CELL));
+    let response = ui.interact(help, ui.id().with("help"), Sense::click()).tip(tr("Help and resources"));
+    if response.hovered() {
+        ui.painter().circle_filled(help.center(), 16.0, t.hover);
+    }
+    ui.painter().circle_filled(help.center(), 15.0, t.panel);
+    ui.painter().text(help.center(), Align2::CENTER_CENTER, "?", crate::theme::regular(15.0), t.text);
+    crate::right::menu_popup(&response).show(|ui| {
+        for (label, command) in [
+            (tr("Getting started"), "help.gettingStarted"),
+            (tr("Keyboard shortcuts"), "help.shortcuts"),
+            (tr("Help page"), "help.page"),
+            (tr("About FigCraft"), "help.about"),
+        ] {
+            if crate::right::menu_item(ui, label, crate::shortcuts::shortcut(command).unwrap_or("")) {
+                app.run(command, json!({}));
+                ui.close();
+            }
+        }
+    });
+}
+
+fn vertical_pill(ui: &Ui, nav: &mut Nav, canvas: Rect, rows: usize, t: &Tokens) -> Rect {
+    const CELL: f32 = 44.0;
+    let height = rows as f32 * CELL + 16.0;
+    let min_y = canvas.min.y + 12.0;
+    let max_y = (canvas.max.y - 12.0 - height).max(min_y);
+    let rect = Rect::from_min_size(pos2(canvas.min.x + 12.0, (canvas.center().y - height / 2.0).clamp(min_y, max_y)), vec2(52.0, height));
+    a11y::area(nav, Region::Toolbar, rect);
+    a11y::container_bounds(ui, rect);
+    let painter = ui.painter();
+    for (offset, alpha) in [(6.0, 10u8), (3.0, 16), (1.0, 24)] {
+        painter.rect_filled(
+            rect.expand(offset).translate(vec2(offset * 0.5, 0.0)),
+            CornerRadius::same((13.0 + offset) as u8),
+            Color32::from_black_alpha(alpha),
+        );
+    }
+    painter.rect_filled(rect, CornerRadius::same(13), t.panel);
+    painter.rect_stroke(rect, CornerRadius::same(13), Stroke::new(1.0, t.border), StrokeKind::Inside);
+    rect
 }
 
 /// The pill shown for a file you can't edit now: Move and Hand, and a badge saying why ("View
@@ -544,12 +717,18 @@ fn done_button(ui: &mut Ui, t: &Tokens, x: f32, cy: f32, tip: &str) -> bool {
 }
 
 fn flyout(app: &mut FigApp, ui: &mut Ui, g: &Group, bottom_left: egui::Pos2) {
+    let item_h = 32.0;
+    let h = item_h * g.tools.len() as f32 + 16.0;
+    flyout_at(app, ui, g, pos2(bottom_left.x, bottom_left.y - h));
+}
+
+fn flyout_at(app: &mut FigApp, ui: &mut Ui, g: &Group, top_left: egui::Pos2) {
     let t = Tokens::get(ui.ctx());
     let item_h = 32.0;
     let w = 220.0;
     let h = item_h * g.tools.len() as f32 + 16.0;
     let mut chosen = None;
-    egui::Area::new(flyout_id(g.key)).fixed_pos(pos2(bottom_left.x, bottom_left.y - h)).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
+    egui::Area::new(flyout_id(g.key)).fixed_pos(top_left).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
         let (rect, _) = ui.allocate_exact_size(vec2(w, h), Sense::hover());
         ui.painter().rect_filled(rect, CornerRadius::same(13), t.menu);
         let mut y = rect.min.y + 8.0;

@@ -148,6 +148,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
     }
     fig.ui.home = false;
     fig.ui.adaptive.enabled = true;
+    fig.ui.adaptive.prefer_floating_toolbar = true;
     figcraft_ui_egui::touch_native::Native::enable(&mut fig);
     figcraft_ui_egui::windows::install(fig);
     let mut options = eframe::NativeOptions { renderer: eframe::Renderer::Wgpu, ..Default::default() };

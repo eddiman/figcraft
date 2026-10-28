@@ -1204,7 +1204,7 @@ impl FigApp {
             return;
         }
         let hidden = self.session.ds().map(|d| d.view.ui_hidden).unwrap_or(false);
-        if self.ui.adaptive.enabled {
+        if self.ui.adaptive.enabled && !adaptive::uses_floating_toolbar(&self.ui.adaptive, ui.available_width()) {
             adaptive::show(self, ui, hidden);
         } else {
             tabs::tab_bar(self, ui);
