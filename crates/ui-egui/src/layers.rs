@@ -141,16 +141,28 @@ pub fn left_panel(app: &mut FigApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let full = ui.max_rect();
     // Header: file name (or "Assets") + drafts + collapse.
-    let (head, _) = ui.allocate_exact_size(vec2(full.width(), 64.0), Sense::hover());
+    let (head, _) = ui.allocate_exact_size(vec2(full.width(), crate::adaptive::target_size(ui, 64.0)), Sense::hover());
     if app.ui.left_tab == LeftTab::Assets {
-        ui.painter().text(pos2(head.min.x + 16.0, head.min.y + 24.0), Align2::LEFT_CENTER, tr("Assets"), semibold(13.0), t.text);
+        ui.painter().text(
+            pos2(head.min.x + 16.0, head.min.y + crate::adaptive::metric(ui, 24.0)),
+            Align2::LEFT_CENTER,
+            tr("Assets"),
+            semibold(crate::adaptive::font_size(ui, 13.0)),
+            t.text,
+        );
     } else {
         let name = app.session.doc().map(|d| d.name.clone()).unwrap_or_default();
         let nr = Rect::from_min_max(pos2(head.min.x + 14.0, head.min.y + 14.0), pos2(head.max.x - 48.0, head.min.y + 34.0));
-        if let Some(new) = crate::widgets::text_field_inline(ui, Id::new("filename"), &name, nr, semibold(13.0)) {
+        if let Some(new) = crate::widgets::text_field_inline(ui, Id::new("filename"), &name, nr, semibold(crate::adaptive::font_size(ui, 13.0))) {
             app.run("file.rename", json!({"name": new}));
         }
-        ui.painter().text(pos2(head.min.x + 16.0, head.min.y + 46.0), Align2::LEFT_CENTER, tr("Drafts"), regular(11.0), t.text_secondary);
+        ui.painter().text(
+            pos2(head.min.x + 16.0, head.min.y + crate::adaptive::metric(ui, 46.0)),
+            Align2::LEFT_CENTER,
+            tr("Drafts"),
+            regular(crate::adaptive::font_size(ui, 11.0)),
+            t.text_secondary,
+        );
     }
     let cell = crate::adaptive::target_size(ui, 24.0);
     let hr = Rect::from_center_size(pos2(head.max.x - cell / 2.0, head.min.y + 24.0), vec2(cell, cell));
@@ -186,7 +198,7 @@ fn pages(app: &mut FigApp, ui: &mut Ui) {
     let toggle_w = if app.ui.adaptive.enabled { w - 2.0 * cell } else { w - 40.0 };
     let tresp = ui.interact(Rect::from_min_size(hr.min, vec2(toggle_w, h)), ui.id().with("pages_toggle"), Sense::click());
     a11y::toggle(&tresp, tr("Pages"), app.ui.pages_open);
-    ui.painter().text(pos2(hr.min.x + 16.0, hr.center().y), Align2::LEFT_CENTER, tr("Pages"), semibold(11.0), t.text);
+    ui.painter().text(pos2(hr.min.x + 16.0, hr.center().y), Align2::LEFT_CENTER, tr("Pages"), semibold(crate::adaptive::font_size(ui, 11.0)), t.text);
     if tresp.clicked() {
         app.ui.pages_open = !app.ui.pages_open;
     }
@@ -557,7 +569,7 @@ fn rename_field(app: &mut FigApp, ui: &mut Ui, id: NodeId, depth: usize, name: &
         Rect::from_min_max(pos2(row_x0(rr, depth) + 32.0, r.min.y + 4.0), pos2(rr.max.x - 4.0, r.max.y - 4.0))
     };
     let start = app.ui.rename.is_some_and(|x| x.start);
-    let (out, open) = crate::widgets::rename_field(ui, rename_id(id), name, rect, regular(11.0), start);
+    let (out, open) = crate::widgets::rename_field(ui, rename_id(id), name, rect, regular(crate::adaptive::font_size(ui, 11.0)), start);
     app.ui.rename = open.then_some(Rename { id, start: false });
     out
 }
@@ -579,7 +591,7 @@ fn set_expanded_deep(doc: &Document, id: NodeId, open: bool, expanded: &mut BTre
 
 /// The search row under the Layers header (live filter; Escape closes it).
 fn search_field(app: &mut FigApp, ui: &mut Ui, t: &Tokens, w: f32, id: Id) {
-    let h = if app.ui.adaptive.enabled { 52.0 } else { 32.0 };
+    let h = if app.ui.adaptive.enabled { crate::adaptive::target_size(ui, 52.0) } else { 32.0 };
     let (fr, _) = ui.allocate_exact_size(vec2(w, h), Sense::hover());
     let field = Rect::from_min_max(pos2(fr.min.x + 12.0, fr.min.y + 2.0), pos2(fr.max.x - 12.0, fr.max.y - 6.0));
     ui.painter().rect_filled(field, CornerRadius::same(5), t.field);
@@ -590,7 +602,7 @@ fn search_field(app: &mut FigApp, ui: &mut Ui, t: &Tokens, w: f32, id: Id) {
         egui::TextEdit::singleline(&mut app.ui.layer_filter)
             .id(id)
             .frame(egui::Frame::NONE)
-            .font(regular(11.0))
+            .font(regular(crate::adaptive::font_size(ui, 11.0)))
             .hint_text(tr("Find layers"))
             .vertical_align(egui::Align::Center)
             .desired_width(te_rect.width()),
@@ -609,7 +621,13 @@ fn layers(app: &mut FigApp, ui: &mut Ui) {
     let w = ui.available_width();
     let cell = crate::adaptive::target_size(ui, 24.0);
     let (hr, _) = ui.allocate_exact_size(vec2(w, crate::adaptive::target_size(ui, 40.0)), Sense::hover());
-    ui.painter().text(pos2(hr.min.x + 16.0, hr.center().y), Align2::LEFT_CENTER, tr("Layers"), semibold(11.0), t.text);
+    ui.painter().text(
+        pos2(hr.min.x + 16.0, hr.center().y),
+        Align2::LEFT_CENTER,
+        tr("Layers"),
+        semibold(crate::adaptive::font_size(ui, 11.0)),
+        t.text,
+    );
     let sx = if app.ui.adaptive.enabled { hr.max.x - cell / 2.0 } else { hr.max.x - 22.0 };
     let sr = Rect::from_center_size(pos2(sx, hr.center().y), vec2(cell, cell));
     let sresp = ui.interact(sr, ui.id().with("layer_search_btn"), Sense::click()).tip(tr("Search layers"));
@@ -773,7 +791,7 @@ fn layers(app: &mut FigApp, ui: &mut Ui) {
             // Expand triangle.
             if row.has_kids {
                 let tri = if app.ui.adaptive.enabled {
-                    Rect::from_min_size(pos2(x0, r.top()), vec2(44.0, row_height))
+                    Rect::from_min_size(pos2(x0, r.top()), vec2(crate::adaptive::target_size(ui, 44.0), row_height))
                 } else {
                     Rect::from_center_size(pos2(x0 + 6.0, r.center().y), vec2(14.0, 14.0))
                 };
@@ -821,13 +839,13 @@ fn layers(app: &mut FigApp, ui: &mut Ui) {
                 let font = if doc.node(n.parent.unwrap_or(page)).is_some_and(|p| p.is_page())
                     && (n.kind.is_frame_like() || matches!(n.kind, NodeKind::Section { .. }))
                 {
-                    semibold(11.0)
+                    semibold(crate::adaptive::font_size(ui, 11.0))
                 } else {
-                    regular(11.0)
+                    regular(crate::adaptive::font_size(ui, 11.0))
                 };
                 let name = if n.name.is_empty() { tr(n.kind.label()).to_string() } else { n.name.clone() };
                 // Room left of the lock and eye buttons.
-                let max_w = (rr.max.x - if app.ui.adaptive.enabled { 88.0 } else { 56.0 } - name_x).max(20.0);
+                let max_w = (rr.max.x - if app.ui.adaptive.enabled { 2.0 * crate::adaptive::target_size(ui, 44.0) } else { 56.0 } - name_x).max(20.0);
                 crate::bidi::paint_name(ui.painter(), pos2(name_x, r.center().y), &name, font, col, max_w);
             }
             // A sweep across the eyes or padlocks takes in the rows the pointer passes.
@@ -845,8 +863,14 @@ fn layers(app: &mut FigApp, ui: &mut Ui) {
             let show_eye = app.ui.adaptive.enabled || over || hidden;
             let (er, lr) = if app.ui.adaptive.enabled {
                 (
-                    Rect::from_center_size(pos2(rr.max.x - 22.0, r.center().y), vec2(44.0, row_height)),
-                    Rect::from_center_size(pos2(rr.max.x - 66.0, r.center().y), vec2(44.0, row_height)),
+                    Rect::from_center_size(
+                        pos2(rr.max.x - crate::adaptive::target_size(ui, 44.0) / 2.0, r.center().y),
+                        vec2(crate::adaptive::target_size(ui, 44.0), row_height),
+                    ),
+                    Rect::from_center_size(
+                        pos2(rr.max.x - crate::adaptive::target_size(ui, 44.0) * 1.5, r.center().y),
+                        vec2(crate::adaptive::target_size(ui, 44.0), row_height),
+                    ),
                 )
             } else {
                 (

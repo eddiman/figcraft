@@ -1,4 +1,4 @@
-use egui::{Rect, pos2, vec2};
+use egui::{Rect, TextStyle, pos2, vec2};
 
 use crate::CANVAS_MIN;
 use crate::adaptive::{InputDensity, Layout, LayoutInput, LayoutMode, PanelPresentation, PanelSide, SafeInsets, WIDE_WIDTH, layout};
@@ -13,6 +13,8 @@ fn input(width: f32) -> LayoutInput {
         left_visible: true,
         right_visible: true,
         medium_panel: PanelSide::Right,
+        header_height: 88.0,
+        tool_height: 100.0,
     }
 }
 
@@ -150,6 +152,38 @@ fn ipad_layout_density_and_hidden_panels() {
             check_geometry(l);
         }
     }
+}
+
+#[test]
+fn ipad_layout_reserves_the_measured_header_and_tool_rows() {
+    let mut i = input(1200.0);
+    i.header_height = 132.0;
+    i.tool_height = 96.0;
+    let l = layout(&i);
+    assert_eq!(l.toolbar.height(), 132.0);
+    assert_eq!(l.canvas.top(), 132.0);
+    assert_eq!(l.canvas.bottom(), 800.0 - 96.0);
+    check_geometry(l);
+}
+
+#[test]
+fn ipad_text_scale_changes_editor_chrome_without_a_document_preference() {
+    for (scale, body, control) in [
+        (crate::adaptive::UiTextScale::Percent100, 11.0, 44.0),
+        (crate::adaptive::UiTextScale::Percent150, 16.5, 66.0),
+        (crate::adaptive::UiTextScale::Percent200, 22.0, 88.0),
+    ] {
+        let ctx = egui::Context::default();
+        crate::theme::apply(&ctx, crate::theme::Tokens::light());
+        crate::theme::apply_ipad_metrics(&ctx, scale.factor());
+        let mut style = None;
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| style = Some(ui.style().clone()));
+        output.textures_delta.clear();
+        let style = style.unwrap();
+        assert_eq!(style.text_styles[&TextStyle::Body].size, body);
+        assert_eq!(style.spacing.interact_size, vec2(control, control));
+    }
+    assert_eq!(crate::adaptive::UiTextScale::Percent200.label(), "200%");
 }
 struct Editor {
     app: crate::FigApp,
@@ -336,21 +370,27 @@ fn ipad_primary_actions_reachable() {
             let mut e = Editor::new(size);
             e.app.ui.adaptive.keyboard = keyboard;
             e.frame(vec![]);
-            let keys = [
-                "save",
-                "undo",
-                "redo",
-                "layers",
-                "assets",
-                "properties",
-                "actions",
-                "multi_select",
-                "constrain",
-                "duplicate",
-                "context",
-                "close_tab",
-            ];
-            let rects: Vec<_> = keys.into_iter().map(|key| (key, e.action(key))).collect();
+            let keys: &[&str] = if keyboard.is_some() {
+                // The keyboard leaves one tool row. The active tool stays direct, and its tool
+                // catalog and modifiers have separate 44-point disclosures.
+                &["save", "undo", "redo", "layers", "assets", "properties", "close_tab"]
+            } else {
+                &[
+                    "save",
+                    "undo",
+                    "redo",
+                    "layers",
+                    "assets",
+                    "properties",
+                    "actions",
+                    "multi_select",
+                    "constrain",
+                    "duplicate",
+                    "context",
+                    "close_tab",
+                ]
+            };
+            let rects: Vec<_> = keys.iter().map(|key| (*key, e.action(key))).collect();
             for (key, rect) in &rects {
                 assert!(rect.width() >= 44.0 && rect.height() >= 44.0, "{size:?} {key}: {rect:?}");
                 assert!(Rect::from_min_size(egui::Pos2::ZERO, size).contains_rect(*rect), "{key}");
@@ -393,7 +433,7 @@ fn ipad_shared_panel_commands_reveal_drawers() {
         let mut e = Editor::new(vec2(width, 900.0));
         e.click("assets");
         assert_eq!(e.app.ui.left_tab, crate::LeftTab::Assets);
-        assert_eq!(e.app.ui.adaptive.drawer, (width < WIDE_WIDTH).then_some(PanelSide::Left));
+        assert_eq!(e.app.ui.adaptive.drawer, (width < WIDE_WIDTH).then_some(PanelSide::Left), "width {width}");
         if width < WIDE_WIDTH {
             e.click("close_drawer");
         }

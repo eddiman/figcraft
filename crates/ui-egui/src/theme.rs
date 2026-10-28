@@ -174,6 +174,25 @@ pub fn apply_with(ctx: &Context, t: Tokens, reduce_motion: bool) {
     });
 }
 
+/// Apply the shared iPad presentation metrics after the normal desktop theme. The profile only
+/// changes editor chrome, so a document's fonts and exported output retain their own sizes.
+pub fn apply_ipad_metrics(ctx: &Context, factor: f32) {
+    let factor = factor.clamp(1.0, 2.0);
+    ctx.global_style_mut(|s| {
+        s.spacing.item_spacing = egui::vec2(8.0 * factor, 6.0 * factor);
+        s.spacing.button_padding = egui::vec2(8.0 * factor, 4.0 * factor);
+        s.spacing.interact_size = egui::vec2(44.0 * factor, 44.0 * factor);
+        s.text_styles = [
+            (TextStyle::Small, FontId::new(10.0 * factor, FontFamily::Proportional)),
+            (TextStyle::Body, FontId::new(11.0 * factor, FontFamily::Proportional)),
+            (TextStyle::Button, FontId::new(11.0 * factor, FontFamily::Proportional)),
+            (TextStyle::Heading, FontId::new(13.0 * factor, FontFamily::Name("semibold".into()))),
+            (TextStyle::Monospace, FontId::new(11.0 * factor, FontFamily::Monospace)),
+        ]
+        .into();
+    });
+}
+
 /// egui visuals for tokens `t`.
 fn visuals(t: Tokens) -> Visuals {
     let mut v = if t.dark { Visuals::dark() } else { Visuals::light() };

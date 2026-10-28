@@ -147,6 +147,8 @@ struct OwnedSavePrompt {
     prepared: PreparedSave,
     name: String,
     focus: bool,
+    /// Submission feedback stays beside the destination field so the user can correct it.
+    error: Option<String>,
 }
 
 pub type PlatformDone = Box<dyn FnOnce(&mut FigApp, Payload)>;
@@ -168,6 +170,7 @@ pub(crate) struct PendingRequests {
     entries: BTreeMap<RequestId, Pending>,
     saves: BTreeMap<WriteOrder, PreparedSave>,
     save_prompt: Option<OwnedSavePrompt>,
+    save_errors: BTreeMap<u64, String>,
 }
 
 fn allocate_id(counter: &AtomicU64) -> Result<RequestId, RejectReason> {
@@ -204,7 +207,7 @@ impl FigApp {
             let name = source.map(|tab| tab.document_itself().name.clone()).unwrap_or_else(|| "Untitled".into());
             let ctx = self.platform_context.clone();
             crate::a11y::sheet_opened(self, &ctx);
-            self.platform_requests.save_prompt = Some(OwnedSavePrompt { prepared, name, focus: true });
+            self.platform_requests.save_prompt = Some(OwnedSavePrompt { prepared, name, focus: true, error: None });
             self.platform_context.request_repaint();
         }
     }
@@ -218,11 +221,13 @@ impl FigApp {
         self.services.set_request_repaint(self.platform_context.clone());
         match self.services.submit_owned_save(OwnedSaveRequest { prepared: prepared.clone(), destination }) {
             Ok(()) => {
+                self.platform_requests.save_errors.remove(&prepared.identity().document_uid());
                 self.platform_requests.saves.insert(order, prepared);
                 self.toast(crate::i18n::tr("Saving..."));
                 true
             }
             Err(error) => {
+                self.platform_requests.save_errors.insert(prepared.identity().document_uid(), error.clone());
                 self.platform_error(&error);
                 false
             }
@@ -231,6 +236,10 @@ impl FigApp {
 
     pub(crate) fn owned_save_pending(&self, uid: u64) -> bool {
         self.platform_requests.saves.values().any(|prepared| prepared.identity().document_uid() == uid)
+    }
+
+    pub(crate) fn owned_save_error(&self, uid: u64) -> Option<&str> {
+        self.platform_requests.save_errors.get(&uid).map(String::as_str)
     }
 
     fn poll_owned_saves(&mut self, ctx: &egui::Context) {
@@ -247,6 +256,7 @@ impl FigApp {
                 Ok(OwnedSaveOutcome::Saved(path)) => path,
                 Ok(OwnedSaveOutcome::Superseded) => continue,
                 Err(error) => {
+                    self.platform_requests.save_errors.insert(prepared.identity().document_uid(), error.clone());
                     self.platform_error(&error);
                     continue;
                 }
@@ -282,9 +292,15 @@ impl FigApp {
             ui.label(crate::i18n::tr("Save a local copy in this app. The imported original is unchanged."));
             let field = ui.add(egui::TextEdit::singleline(&mut prompt.name).min_size(target));
             crate::a11y::text(&field, crate::i18n::tr("Name"), &prompt.name);
+            if field.changed() {
+                prompt.error = None;
+            }
             if prompt.focus {
                 field.request_focus();
                 prompt.focus = false;
+            }
+            if let Some(error) = &prompt.error {
+                ui.colored_label(crate::theme::Tokens::get(ui.ctx()).danger, error);
             }
             save = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
             ui.horizontal(|ui| {
@@ -299,6 +315,7 @@ impl FigApp {
         cancel |= ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
         if save {
             if !self.submit_owned_save(prompt.prepared.clone(), OwnedSaveDestination::NewCopy(prompt.name.clone())) {
+                prompt.error = self.owned_save_error(prompt.prepared.identity().document_uid()).map(str::to_owned);
                 self.platform_requests.save_prompt = Some(prompt);
             }
         } else if open && !cancel {

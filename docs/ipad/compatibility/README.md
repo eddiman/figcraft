@@ -16,6 +16,9 @@ preparation, not an upstream-update rehearsal or product qualification.
 - No new collaboration wire version is introduced. Compatibility with previous
   shipped clients/server versions has not been independently qualified.
 - Existing desktop/web defaults and the shared engine/panels remain in use.
+- T35 keeps the 760/1100-point responsive thresholds, engine, renderer,
+  document format, command IDs, save acknowledgement, recovery and native event
+  loop unchanged. Its presentation text scale is local to adaptive iPad UI.
 
 ## Current evidence and limits
 
@@ -40,3 +43,7 @@ No newer upstream commit was fetched, merged or tested for this preparation.
 Conflict counts, integration duration, retired patches and post-merge behavior
 are therefore not available. No main/release branch, authentication, signing,
 workflow or branding configuration was changed.
+
+T35 source evidence records the scoped profile, geometry and owned-save tests.
+Xcode is unavailable in the implementation environment, so iOS target,
+simulator and physical-device qualification remain separate review work.

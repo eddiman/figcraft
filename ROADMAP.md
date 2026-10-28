@@ -1,5 +1,19 @@
 # FigCraft Roadmap
 
+Local iPad shared-editor design work, 2026-10-23: T35 is in review after
+T18/T19/T22. It adds an iPad-only 100/150/200 percent presentation profile,
+measured header/tool-row fitting, independent docks, compact Home adaptation,
+direct active tools and prompt-local save failure feedback. Targeted shared
+tests and the iPad app check pass. The full UI suite lacks the optional
+craft-font checkout. Xcode 26.3 built and installed the development app on an
+iPad Air 11-inch (M3) Simulator, and direct launch plus image capture passed.
+The packaging test runner stopped after installation without a test summary, so
+automated interaction evidence remains open. It retains engine, renderer,
+document, command, saved-state/recovery and event-loop behavior. Physical iPad
+Air 5 observations remain preliminary; T20's focused-field keyboard restart
+and touch-selection finding remains open, and T32 is undecided. No release
+readiness is claimed.
+
 Local iPad canvas-focus repair, 2026-10-19: T20 traced disappearing native
 input to missing shared IME output on event-free redraws. The shared handler
 now preserves active canvas text presentation before returning for empty

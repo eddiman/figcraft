@@ -57,14 +57,7 @@ fn remembered(ui: &Ui, key: &str, default: ToolId) -> ToolId {
 /// The same tool catalog and command routes, allocated in scrollable touch rows.
 pub(crate) fn touch_show(app: &mut FigApp, ui: &mut Ui, compact: bool) {
     if compact {
-        egui::ScrollArea::horizontal().id_salt("compact_touch_tools").show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.menu_button(tr("Tools"), |ui| {
-                    egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| touch_tools(app, ui));
-                });
-                touch_modifiers(app, ui);
-            });
-        });
+        touch_compact(app, ui);
         return;
     }
     egui::ScrollArea::horizontal().id_salt("touch_tools").show(ui, |ui| {
@@ -73,6 +66,73 @@ pub(crate) fn touch_show(app: &mut FigApp, ui: &mut Ui, compact: bool) {
     egui::ScrollArea::horizontal().id_salt("touch_modifiers").show(ui, |ui| {
         ui.horizontal(|ui| touch_modifiers(app, ui));
     });
+}
+
+/// One short shelf keeps the active tool as a direct target. Its disclosure changes that tool,
+/// while named menus retain the rest of the catalog and the touch modifiers.
+fn touch_compact(app: &mut FigApp, ui: &mut Ui) {
+    let control = crate::adaptive::target_size(ui, 44.0);
+    if let Some(current) = app.session.ds().ok().and_then(|ds| ds.vector_edit.as_ref()).map(|v| v.tool) {
+        if crate::adaptive::button(app, ui, current.id(), tr(current.label()), true) {
+            app.run("vector.edit.tool", json!({"tool": current.id()}));
+        }
+        let (response, menu) =
+            egui::containers::menu::MenuButton::from_button(egui::Button::new("▾").min_size(vec2(control, control))).ui(ui, |ui| {
+                for tool in VTool::ALL {
+                    if crate::adaptive::button(app, ui, tool.id(), tr(tool.label()), tool == current) {
+                        app.run("vector.edit.tool", json!({"tool": tool.id()}));
+                        ui.close();
+                    }
+                }
+            });
+        a11y::menu_button(&response, tr("Tools"), menu.is_some());
+        app.ui.adaptive.actions.push(("tool_disclosure", response.rect.intersect(ui.clip_rect())));
+        if crate::adaptive::button(app, ui, "done", tr("Done editing"), false) {
+            app.run("vector.edit.end", json!({}));
+        }
+        return;
+    }
+
+    let read_only = app.session.active_read_only().is_some();
+    let current = app.session.tool.tool;
+    let group = GROUPS.iter().find(|group| group.tools.iter().any(|(tool, _)| *tool == current)).unwrap_or(&GROUPS[0]);
+    let shown = if group.tools.iter().any(|(tool, _)| *tool == current) { current } else { remembered(ui, group.key, group.tools[0].0) };
+    if crate::adaptive::button(app, ui, group.key, tr(shown.label()), shown == current) {
+        app.run("tool.set", json!({"tool": shown.id()}));
+    }
+    let (response, menu) = egui::containers::menu::MenuButton::from_button(egui::Button::new("▾").min_size(vec2(control, control))).ui(ui, |ui| {
+        for (tool, _) in group.tools {
+            if (!read_only || matches!(tool, ToolId::Move | ToolId::Hand))
+                && crate::adaptive::button(app, ui, tool.id(), tr(tool.label()), *tool == current)
+            {
+                app.run("tool.set", json!({"tool": tool.id()}));
+                ui.close();
+            }
+        }
+    });
+    a11y::menu_button(&response, tr(group.name), menu.is_some());
+    app.ui.adaptive.actions.push(("tool_disclosure", response.rect.intersect(ui.clip_rect())));
+    let (response, menu) =
+        egui::containers::menu::MenuButton::from_button(egui::Button::new(tr("Tools")).min_size(vec2(control, control))).ui(ui, |ui| {
+            for other in GROUPS {
+                for (tool, _) in other.tools {
+                    if (!read_only || matches!(tool, ToolId::Move | ToolId::Hand))
+                        && crate::adaptive::button(app, ui, tool.id(), tr(tool.label()), *tool == current)
+                    {
+                        app.run("tool.set", json!({"tool": tool.id()}));
+                        ui.close();
+                    }
+                }
+            }
+        });
+    a11y::menu_button(&response, tr("Tools"), menu.is_some());
+    app.ui.adaptive.actions.push(("tool_more", response.rect.intersect(ui.clip_rect())));
+    let (response, menu) =
+        egui::containers::menu::MenuButton::from_button(egui::Button::new(tr("Tools")).min_size(vec2(control, control))).ui(ui, |ui| {
+            touch_modifiers(app, ui);
+        });
+    a11y::menu_button(&response, tr("Tools"), menu.is_some());
+    app.ui.adaptive.actions.push(("touch_controls", response.rect.intersect(ui.clip_rect())));
 }
 
 fn touch_tools(app: &mut FigApp, ui: &mut Ui) {
@@ -92,23 +152,43 @@ fn touch_tools(app: &mut FigApp, ui: &mut Ui) {
             if tools.is_empty() {
                 continue;
             }
-            let (response, menu) =
-                egui::containers::menu::MenuButton::from_button(egui::Button::new(tr(group.name)).min_size(vec2(44.0, 44.0))).ui(ui, |ui| {
-                    for (tool, _) in &tools {
-                        if ui.add_sized([ui.available_width().max(44.0), 44.0], egui::Button::new(tr(tool.label()))).clicked() {
-                            app.run("tool.set", json!({"tool": tool.id()}));
-                            ui.close();
+            let current = app.session.tool.tool;
+            let shown = if tools.iter().any(|(tool, _)| *tool == current) { current } else { remembered(ui, group.key, tools[0].0) };
+            if crate::adaptive::button(app, ui, group.key, tr(shown.label()), shown == current) {
+                app.run("tool.set", json!({"tool": shown.id()}));
+            }
+            if group.tools.len() > 1 {
+                let control = crate::adaptive::target_size(ui, 44.0);
+                let (response, menu) =
+                    egui::containers::menu::MenuButton::from_button(egui::Button::new("▾").min_size(vec2(control, control))).ui(ui, |ui| {
+                        for (tool, _) in &tools {
+                            if ui.add_sized([ui.available_width().max(control), control], egui::Button::new(tr(tool.label()))).clicked() {
+                                app.run("tool.set", json!({"tool": tool.id()}));
+                                if let Some(index) = ToolId::ALL.iter().position(|candidate| candidate == tool) {
+                                    ui.data_mut(|d| d.insert_temp(egui::Id::new(("tb_last", group.key)), index as u8));
+                                }
+                                ui.close();
+                            }
                         }
-                    }
-                });
-            a11y::menu_button(&response, tr(group.name), menu.is_some());
-            if group.tools.iter().any(|(tool, _)| *tool == app.session.tool.tool) {
-                a11y::prefer(&mut app.ui.nav, Region::Toolbar, response.id);
+                    });
+                a11y::menu_button(&response, tr(group.name), menu.is_some());
+                if group.tools.iter().any(|(tool, _)| *tool == app.session.tool.tool) {
+                    a11y::prefer(&mut app.ui.nav, Region::Toolbar, response.id);
+                }
+                if response.has_focus() {
+                    response.scroll_to_me(None);
+                }
+                app.ui.adaptive.actions.push((
+                    match group.key {
+                        "move" => "move_disclosure",
+                        "frame" => "frame_disclosure",
+                        "shape" => "shape_disclosure",
+                        "pen" => "pen_disclosure",
+                        _ => "tool_disclosure",
+                    },
+                    response.rect.intersect(ui.clip_rect()),
+                ));
             }
-            if response.has_focus() {
-                response.scroll_to_me(None);
-            }
-            app.ui.adaptive.actions.push((group.key, response.rect.intersect(ui.clip_rect())));
         }
         if app.session.tool.tool == ToolId::ShapeBuilder {
             for (mode, label) in [("merge", tr("Merge")), ("remove", tr("Remove"))] {

@@ -1,5 +1,26 @@
 # Local iPad port development log
 
+## 2026-10-23: T35 shared-editor presentation review
+
+T35 adds a presentation-only 100, 150 and 200 percent text setting, measured
+header and tool-row fitting, separate dock visibility, a compact Home layout,
+an explicit active tool and prompt-local owned-save failures. Touch More now
+dispatches Save As through the existing menu path, and Present uses matching
+touch hit, hover and paint rectangles. The pass keeps the engine, renderer,
+document, command identifiers, save acknowledgement, recovery and event-loop
+boundaries unchanged.
+
+The targeted adaptive, owned-save, save-prompt and catalog checks pass, as does
+`cargo check -p figcraft-ipad`. Full UI coverage still lacks the optional
+`../craft-fonts` checkout, and `cargo xtask ci` stops at the pre-existing
+formatter order for the untracked `edit_menu.rs` registration. Xcode 26.3 at
+`/Volumes/XcodeDev/Xcode-26.3.0.app` built, signed and installed the development
+app on an iPad Air 11-inch (M3) Simulator. Direct smoke launch and raw image
+capture succeeded. The packaging test runner stopped after installing its
+runner and did not write a summary or test captures, so it does not qualify the
+interaction workflow. Physical-device checks, T20's focused-field keyboard
+restart and touch selection remain open.
+
 ## 2026-10-19: T20 canvas IME output survives idle frames
 
 A fresh canvas edit lost IME output on the first redraw with no input events.

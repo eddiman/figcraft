@@ -25,6 +25,7 @@ pub mod cursors;
 pub mod dev_compare;
 pub mod dev_mode;
 pub mod dialogs;
+mod edit_menu;
 pub mod export_panel;
 pub mod field_math;
 pub mod font_preview;
@@ -1084,6 +1085,9 @@ impl FigApp {
         // New files take the theme's page colour (existing pages keep theirs).
         self.session.set_ui_dark(dark);
         theme::apply_with(ctx, if dark { theme::Tokens::dark() } else { theme::Tokens::light() }, self.reduce_motion());
+        if self.ui.adaptive.enabled {
+            theme::apply_ipad_metrics(ctx, self.ui.adaptive.text_scale.factor());
+        }
         if self.worker.is_none() {
             self.worker = Some(render_worker::Worker::new(ctx.clone()));
         }
@@ -1141,6 +1145,7 @@ impl FigApp {
             windows::repaint_others(self, &ctx);
         }
         windows::show(self, &ctx);
+        edit_menu::show(self, &ctx);
         // Plugins installed, removed or set up are kept at once: a crash doesn't lose them.
         // So are the owner tokens of files put online.
         if std::mem::take(&mut self.session.plugins.unsaved) | std::mem::take(&mut self.session.live.unsaved) {
@@ -1155,9 +1160,10 @@ impl FigApp {
     /// One frame of the window drawing now.
     pub(crate) fn frame(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
-        ctx.data_mut(|d| d.insert_temp(egui::Id::new("ipad_touch_density"), self.ui.adaptive.enabled));
+        adaptive::install_metrics(&ctx, &self.ui.adaptive);
         if self.ui.adaptive.enabled {
-            ui.spacing_mut().interact_size = egui::vec2(44.0, 44.0);
+            let control = adaptive::target_size(ui, 44.0);
+            ui.spacing_mut().interact_size = egui::vec2(control, control);
         }
         let t = theme::Tokens::get(&ctx);
         // A field that had the keyboard when the frame began keeps its keys from the shortcuts

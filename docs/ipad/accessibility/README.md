@@ -5,6 +5,19 @@ target sizing and visible feedback. VoiceOver/native accessibility bridging,
 contrast-specific adaptations and reduced-motion adaptations are excluded.
 Existing shared accessibility code remains intact.
 
+## T35 presentation follow-up, 2026-10-23
+
+T35 is in review after applying these retained touch and focus findings to a
+scoped shared iPad presentation profile. It adds no VoiceOver bridge and does
+not claim Dynamic Type support. The 100/150/200 percent choices apply only to
+the adaptive iPad presentation. The shared tests cover compact, medium and wide
+logical widths, threshold edges, keyboard geometry and focus restoration.
+Rendered Home, tabs, layer, inspector and tool capture remains a review item.
+
+The physical iPad Air 5 record remains preliminary. Its repeated focused-field
+tap keyboard restart and touch text-selection issue stays with T20. A
+presentation pass does not close that input gate or decide T32.
+
 ## Repairs and software coverage
 
 The adaptive Text menu target was about 37 points wide. Touch tool group

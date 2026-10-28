@@ -73,7 +73,6 @@ impl eframe::App for Shell {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         ui.painter().rect_filled(ui.max_rect(), 0.0, ui.visuals().panel_fill);
         ui.add_space(ui.input(|i| i.safe_area_insets().0.top).max(32.0));
-        ui.label("Open imports a copy. Export creates a copy in Files.");
         if figcraft_text::CRAFT_FONTS.is_empty() {
             ui.label("Document fonts are unavailable in this development build.");
         }

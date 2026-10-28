@@ -139,17 +139,24 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.panel)).show(ui, |ui| {
         let rect = ui.max_rect();
-        let left = Rect::from_min_size(rect.min, vec2(SIDEBAR, rect.height()));
-        ui.painter().line_segment([left.right_top(), left.right_bottom()], Stroke::new(1.0, t.border));
-        sidebar(app, ui, &t, left);
+        let compact = crate::adaptive::touch(ui.ctx()) && rect.width() < crate::adaptive::MEDIUM_WIDTH;
+        let control = crate::adaptive::target_size(ui, 44.0);
+        let nav_height = if compact { control + 8.0 } else { 0.0 };
+        let left = Rect::from_min_size(rect.min, vec2(if compact { 0.0 } else { SIDEBAR }, rect.height()));
+        if compact {
+            compact_navigation(app, ui, &t, Rect::from_min_size(rect.min, vec2(rect.width(), nav_height)));
+        } else {
+            ui.painter().line_segment([left.right_top(), left.right_bottom()], Stroke::new(1.0, t.border));
+            sidebar(app, ui, &t, left);
+        }
         if app.ui.home_view.section == Section::Online {
             // Your online files lay themselves out in the area (and scroll their own list).
-            let area = Rect::from_min_max(pos2(left.max.x + 40.0, rect.min.y + 24.0), rect.max - vec2(40.0, 24.0));
+            let area = Rect::from_min_max(pos2(left.max.x + 40.0, rect.min.y + nav_height + 24.0), rect.max - vec2(40.0, 24.0));
             crate::online::section(app, ui, area, &t);
             opened_join(app);
             return;
         }
-        let main = Rect::from_min_max(pos2(left.max.x, rect.min.y), rect.max);
+        let main = Rect::from_min_max(pos2(left.max.x, rect.min.y + nav_height), rect.max);
         ui.scope_builder(egui::UiBuilder::new().max_rect(main), |ui| {
             egui::ScrollArea::vertical().id_salt("home").auto_shrink([false, false]).show(ui, |ui| {
                 egui::Frame::NONE.inner_margin(egui::Margin::symmetric(40, 24)).show(ui, |ui| {
@@ -162,6 +169,25 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
             });
         });
     });
+}
+
+fn compact_navigation(app: &mut FigApp, ui: &mut Ui, t: &Tokens, rect: Rect) {
+    ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+        egui::ScrollArea::horizontal().id_salt("home_navigation").show(ui, |ui| {
+            ui.horizontal(|ui| {
+                for (section, _, label) in Section::ALL {
+                    let control = crate::adaptive::target_size(ui, 44.0);
+                    let active = app.ui.home_view.section == section;
+                    let response = ui.add(egui::Button::new(tr(label)).selected(active).min_size(vec2(control, control)));
+                    a11y::tab(&response, tr(label), active);
+                    if response.clicked() {
+                        app.ui.home_view.section = section;
+                    }
+                }
+            });
+        });
+    });
+    ui.painter().line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0, t.border));
 }
 
 fn sidebar(app: &mut FigApp, ui: &mut Ui, t: &Tokens, left: Rect) {
@@ -202,23 +228,27 @@ fn card_frame(ui: &Ui, t: &Tokens, rect: Rect, resp: &Response) {
 }
 
 fn heading(ui: &mut Ui, t: &Tokens, text: &str) {
-    ui.label(egui::RichText::new(text).font(semibold(18.0)).color(t.text));
-    ui.add_space(24.0);
+    ui.label(egui::RichText::new(text).font(semibold(crate::adaptive::font_size(ui, 18.0))).color(t.text));
+    ui.add_space(crate::adaptive::metric(ui, 24.0));
 }
 
 fn subheading(ui: &mut Ui, t: &Tokens, text: &str) {
-    ui.add_space(28.0);
-    ui.label(egui::RichText::new(text).font(semibold(12.0)).color(t.text_secondary));
-    ui.add_space(12.0);
+    ui.add_space(crate::adaptive::metric(ui, 28.0));
+    ui.label(egui::RichText::new(text).font(semibold(crate::adaptive::font_size(ui, 12.0))).color(t.text_secondary));
+    ui.add_space(crate::adaptive::metric(ui, 12.0));
 }
 
 /// A card with an icon tile, a title and a line under it; true when chosen.
 fn action_card(ui: &mut Ui, t: &Tokens, icon: Icon, title: &str, sub: &str) -> bool {
-    let (r, mut resp) = ui.allocate_exact_size(vec2(260.0, 72.0), Sense::click());
+    let width = ui.available_width().min(crate::adaptive::metric(ui, 260.0));
+    let (r, mut resp) = ui.allocate_exact_size(vec2(width, crate::adaptive::metric(ui, 72.0)), Sense::click());
     a11y::button(&resp, title);
     // One line each inside the card; a long translation ends with an ellipsis, in full on hover.
     let text_w = r.width() - 72.0;
-    let (title_shown, sub_shown) = (widgets::elide_font(ui, title, text_w, semibold(12.0)), widgets::elide(ui, sub, text_w));
+    let (title_shown, sub_shown) = (
+        widgets::elide_font(ui, title, text_w, semibold(crate::adaptive::font_size(ui, 12.0))),
+        widgets::elide_font(ui, sub, text_w, regular(crate::adaptive::font_size(ui, 11.0))),
+    );
     if title_shown != title || sub_shown != sub {
         resp = resp.on_hover_text(format!("{title}\n{sub}"));
     }
@@ -226,18 +256,37 @@ fn action_card(ui: &mut Ui, t: &Tokens, icon: Icon, title: &str, sub: &str) -> b
     let ir = Rect::from_min_size(pos2(r.min.x + 16.0, r.center().y - 16.0), vec2(32.0, 32.0));
     ui.painter().rect_filled(ir, CornerRadius::same(6), ACCENT);
     icons::paint(ui.painter(), ir.shrink(8.0), icon, Color32::WHITE);
-    ui.painter().text(pos2(r.min.x + 60.0, r.center().y - 8.0), Align2::LEFT_CENTER, title_shown, semibold(12.0), t.text);
-    ui.painter().text(pos2(r.min.x + 60.0, r.center().y + 9.0), Align2::LEFT_CENTER, sub_shown, regular(11.0), t.text_secondary);
+    ui.painter().text(
+        pos2(r.min.x + 60.0, r.center().y - crate::adaptive::metric(ui, 8.0)),
+        Align2::LEFT_CENTER,
+        title_shown,
+        semibold(crate::adaptive::font_size(ui, 12.0)),
+        t.text,
+    );
+    ui.painter().text(
+        pos2(r.min.x + 60.0, r.center().y + crate::adaptive::metric(ui, 9.0)),
+        Align2::LEFT_CENTER,
+        sub_shown,
+        regular(crate::adaptive::font_size(ui, 11.0)),
+        t.text_secondary,
+    );
     resp.clicked()
 }
 
 fn recents(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
     heading(ui, t, tr("Recents"));
     let (mut new_file, mut open) = (false, false);
-    ui.horizontal(|ui| {
+    let stack_actions = crate::adaptive::touch(ui.ctx()) && ui.available_width() < crate::adaptive::MEDIUM_WIDTH;
+    if stack_actions {
         new_file = action_card(ui, t, Icon::Plus, tr("New design file"), tr("Start from a blank canvas"));
+        ui.add_space(crate::adaptive::metric(ui, 8.0));
         open = action_card(ui, t, Icon::Page, tr("Open file"), tr("Open .figcraft, .svg or images"));
-    });
+    } else {
+        ui.horizontal(|ui| {
+            new_file = action_card(ui, t, Icon::Plus, tr("New design file"), tr("Start from a blank canvas"));
+            open = action_card(ui, t, Icon::Page, tr("Open file"), tr("Open .figcraft, .svg or images"));
+        });
+    }
     if new_file {
         app.run("file.new", json!({}));
         app.ui.home = false;

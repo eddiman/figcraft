@@ -82,10 +82,10 @@ pub fn right_panel(app: &mut FigApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let w = ui.available_width();
     // Top bar: people (you and the others in a live session), present, share.
-    let (top, _) = ui.allocate_exact_size(vec2(w, 48.0), Sense::hover());
+    let (top, _) = ui.allocate_exact_size(vec2(w, crate::adaptive::target_size(ui, 48.0)), Sense::hover());
     // As wide as its label needs (longer in some languages).
-    let label = ui.painter().layout_no_wrap(tr("Share").to_string(), semibold(11.5), Color32::WHITE);
-    let sw = (label.size().x + 24.0).max(56.0);
+    let label = ui.painter().layout_no_wrap(tr("Share").to_string(), semibold(crate::adaptive::font_size(ui, 11.5)), Color32::WHITE);
+    let sw = (label.size().x + crate::adaptive::metric(ui, 24.0)).max(crate::adaptive::target_size(ui, 56.0));
     let sh = crate::adaptive::target_size(ui, 32.0);
     let share = Rect::from_min_size(pos2(top.max.x - 14.0 - sw, top.center().y - sh / 2.0), vec2(sw, sh));
     let sresp = ui.interact(share, ui.id().with("share"), Sense::click()).tip(tr("Share: live session, export"));
@@ -93,23 +93,31 @@ pub fn right_panel(app: &mut FigApp, ui: &mut Ui) {
     ui.painter().galley(share.center() - label.size() / 2.0, label, Color32::WHITE);
     crate::live::share_popover(app, &sresp);
     // Play presents; its chevron opens the play menu (present, or preview in a pane).
-    let play = Rect::from_min_size(pos2(share.min.x - 50.0, top.center().y - 14.0), vec2(42.0, 28.0));
-    let (mut tri_r, mut chev_r) =
-        (Rect::from_min_max(play.min, pos2(play.max.x - 16.0, play.max.y)), Rect::from_min_max(pos2(play.max.x - 16.0, play.min.y), play.max));
-    if crate::adaptive::touch(ui.ctx()) {
-        chev_r = Rect::from_min_size(pos2(share.left() - 48.0, top.center().y - 22.0), vec2(44.0, 44.0));
-        tri_r = chev_r.translate(vec2(-44.0, 0.0));
-    }
+    let (tri_r, chev_r) = if crate::adaptive::touch(ui.ctx()) {
+        let hit = crate::adaptive::target_size(ui, 44.0);
+        let chevron = Rect::from_min_size(pos2(share.left() - hit - crate::adaptive::metric(ui, 4.0), top.center().y - hit / 2.0), vec2(hit, hit));
+        (chevron.translate(vec2(-hit, 0.0)), chevron)
+    } else {
+        let play = Rect::from_min_size(pos2(share.min.x - 50.0, top.center().y - 14.0), vec2(42.0, 28.0));
+        (Rect::from_min_max(play.min, pos2(play.max.x - 16.0, play.max.y)), Rect::from_min_max(pos2(play.max.x - 16.0, play.min.y), play.max))
+    };
+    // The visual hover outline and the painted icons use the same rectangles as interaction.
+    let play = tri_r.union(chev_r);
     let present_keys = crate::toolbar::pretty_shortcut(crate::shortcuts::shortcut("proto.present").unwrap_or(""));
     let presp = ui.interact(tri_r, ui.id().with("play"), Sense::click()).tip(format!("{}  {present_keys}", tr("Present")));
     let mresp = ui.interact(chev_r, ui.id().with("play_menu"), Sense::click()).tip(tr("Present or preview"));
     if presp.hovered() || mresp.hovered() {
         ui.painter().rect_filled(play, CornerRadius::same(5), t.hover);
     }
-    let tri = Rect::from_center_size(play.center() - vec2(7.0, 0.0), vec2(16.0, 16.0));
+    let tri = Rect::from_center_size(tri_r.center(), vec2(crate::adaptive::metric(ui, 16.0), crate::adaptive::metric(ui, 16.0)));
     let c = tri.center();
     ui.painter().add(egui::Shape::closed_line(vec![c + vec2(-5.0, -7.0), c + vec2(7.0, 0.0), c + vec2(-5.0, 7.0)], Stroke::new(1.4, t.icon)));
-    icons::paint(ui.painter(), Rect::from_center_size(play.center() + vec2(12.0, 0.0), vec2(10.0, 10.0)), Icon::Chevron, t.icon_secondary);
+    icons::paint(
+        ui.painter(),
+        Rect::from_center_size(chev_r.center(), vec2(crate::adaptive::metric(ui, 10.0), crate::adaptive::metric(ui, 10.0))),
+        Icon::Chevron,
+        t.icon_secondary,
+    );
     crate::live::people_bar(app, ui, Rect::from_min_max(pos2(top.min.x + 12.0, top.min.y), pos2(play.min.x - 6.0, top.max.y)));
     if presp.clicked() {
         app.run("proto.present", json!({}));
@@ -131,7 +139,7 @@ pub fn right_panel(app: &mut FigApp, ui: &mut Ui) {
     ui.painter().line_segment([tabs.left_top(), tabs.right_top()], Stroke::new(1.0, t.border));
     let mut x = tabs.min.x + 8.0;
     for (tab, label) in [(RightTab::Design, tr("Design")), (RightTab::Prototype, tr("Prototype"))] {
-        let galley = ui.painter().layout_no_wrap(label.into(), semibold(11.0), t.text);
+        let galley = ui.painter().layout_no_wrap(label.into(), semibold(crate::adaptive::font_size(ui, 11.0)), t.text);
         let h = crate::adaptive::target_size(ui, 24.0);
         let r = Rect::from_min_size(pos2(x, tabs.center().y - h / 2.0), vec2(galley.size().x + 16.0, h));
         let resp = ui.interact(r, ui.id().with(("rtab", label)), Sense::click());
@@ -157,7 +165,13 @@ pub fn right_panel(app: &mut FigApp, ui: &mut Ui) {
     if zresp.hovered() {
         ui.painter().rect_filled(zr, CornerRadius::same(5), t.hover);
     }
-    ui.painter().text(pos2(zr.min.x + 6.0, zr.center().y), Align2::LEFT_CENTER, format!("{}%", (zoom * 100.0).round()), regular(11.0), t.text);
+    ui.painter().text(
+        pos2(zr.min.x + 6.0, zr.center().y),
+        Align2::LEFT_CENTER,
+        format!("{}%", (zoom * 100.0).round()),
+        regular(crate::adaptive::font_size(ui, 11.0)),
+        t.text,
+    );
     icons::paint(ui.painter(), Rect::from_center_size(pos2(zr.max.x - 9.0, zr.center().y), vec2(10.0, 10.0)), Icon::Chevron, t.icon_secondary);
     menu_popup(&zresp).width(200.0).show(|ui| {
         for (label, cmd) in [
@@ -488,7 +502,7 @@ fn header(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
     if resp.hovered() {
         ui.painter().rect_filled(lr, CornerRadius::same(5), t.hover);
     }
-    ui.painter().text(pos2(lr.min.x + 8.0, lr.center().y), Align2::LEFT_CENTER, &label, semibold(13.0), t.text);
+    ui.painter().text(pos2(lr.min.x + 8.0, lr.center().y), Align2::LEFT_CENTER, &label, semibold(crate::adaptive::font_size(ui, 13.0)), t.text);
     if is_frame || is_group {
         icons::paint(
             ui.painter(),
@@ -519,7 +533,7 @@ fn header(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
                 for (c, name, pw, ph) in figcraft_engine::cmd::create::FRAME_PRESETS {
                     if *c != cat {
                         cat = c;
-                        ui.label(egui::RichText::new(tr(c)).font(semibold(11.0)).color(t.text_secondary));
+                        ui.label(egui::RichText::new(tr(c)).font(semibold(crate::adaptive::font_size(ui, 11.0))).color(t.text_secondary));
                     }
                     if menu_item(ui, name, &format!("{}×{}", pw, ph)) {
                         app.set_props(&ids, json!({"width": pw, "height": ph}));

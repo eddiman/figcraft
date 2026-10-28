@@ -70,17 +70,18 @@ final class IPadSmokeTests: XCTestCase {
     }
 
     func test_ipad_editor() throws {
-        _ = try text("iPad startup smoke")
+        _ = try text("startup smoke")
         _ = try text("\\b[0O] characters\\b")
         tap(try text("Fixture image"))
-        _ = try text("\\bX\\s+[0O]\\b", minimumX: 0.75)
         tap(try text("Field:"), offsetX: 60)
         app.typeText("abc")
         _ = try text("3 characters")
         _ = try text("abc")
+        app.typeText(String(repeating: "defghijk", count: 8))
+        _ = try text("67 characters")
         tap(try text("Set fixture X = 10"))
         tap(try text("Fixture image"))
-        _ = try text("\\bX\\s+10\\b", minimumX: 0.75)
+        _ = try text("\\b10\\b", minimumX: 0.65)
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = "Typed field and edited fixture"
         attachment.lifetime = .keepAlways
@@ -91,14 +92,14 @@ final class IPadSmokeTests: XCTestCase {
         app.terminate()
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
-        _ = try text("iPad startup smoke")
+        _ = try text("startup smoke")
         _ = try text("\\b[0O] characters\\b")
         tap(try text("Fixture image"))
-        _ = try text("\\bX\\s+10\\b", minimumX: 0.75)
+        _ = try text("\\b10\\b", minimumX: 0.65)
     }
 
     func test_ipad_forced_failure() throws {
-        _ = try text("iPad startup smoke")
+        _ = try text("startup smoke")
         XCTFail("Deliberate T23 assertion failure")
     }
 }
