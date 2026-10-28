@@ -1,5 +1,17 @@
 # Local iPad port development log
 
+## 2026-10-28: T20 focused-field IME interruption guard
+
+The local `egui-winit` patch no longer interrupts composition for an already
+focused iOS field. The previous winit path resigns and then restores first
+responder, which restarts the software keyboard after a repeated field tap.
+Other targets retain the upstream composition-interruption path.
+
+This adjustment does not settle canvas input delivery, native selection, range
+mapping, undo semantics or physical keyboard variants. The iOS simulator target
+build validates the compile path; a targeted simulator interaction and physical
+field check remain required before T20 can leave review.
+
 ## 2026-10-23: T35 shared-editor presentation review
 
 T35 adds a presentation-only 100, 150 and 200 percent text setting, measured

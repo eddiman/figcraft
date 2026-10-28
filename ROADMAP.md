@@ -21,7 +21,10 @@ events. Five text regressions, full CI (2,591/0/10), both iOS checks and native
 canvas/field/idle-transfer diagnostics pass; recovery contains the exact
 typed strings. D20 revision 1 records the bounded review. Physical composition,
 native range/undo semantics and keyboard variants remain unqualified; T20
-stays blocked and T32 undecided. No native adapter or dependency changed.
+stays blocked and T32 undecided. A 2026-10-28 local `egui-winit` guard also
+avoids interrupting an already focused iOS field, because the existing winit
+path resigns and then restores first responder. The guard needs its own
+simulator and physical validation. No native adapter or dependency changed.
 
 Local iPad retained-UI audit, 2026-10-19: T22 repairs 44-point touch-tool
 targets, focus names/scrolling, drawer/save-prompt keyboard restoration and

@@ -1172,7 +1172,9 @@ impl State {
         }
 
         if let Some(ime) = ime {
-            if !is_toggling_ime && ime.should_interrupt_composition {
+            // iOS winit implements this as resign then become first responder, which
+            // dismisses and re-presents the keyboard on every tap of a focused field.
+            if !is_toggling_ime && ime.should_interrupt_composition && !cfg!(target_os = "ios") {
                 // TODO(umajho): use a more proper way to interrupt composition
                 // if `winit` provides one in the future.
 
